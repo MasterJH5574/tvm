@@ -20,9 +20,9 @@ from tvm import topi
 import tvm
 from tvm.te import SpecializedCondition
 from tvm.contrib import nvcc
+from tvm._ffi import get_global_func
 from .generic import *
 from .. import op as _op
-from .... import get_global_func
 
 
 @schedule_injective.register(["cuda", "gpu"])
@@ -146,6 +146,10 @@ def conv2d_strategy_cuda(attrs, inputs, out_type, target):
                     name="conv2d_nchw_winograd.cuda",
                     plevel=5,
                 )
+
+            strategy.add_auto_scheduler(
+                wrap_compute_conv2d(topi.nn.conv2d_nchw), name="conv2d_nchw"
+            )
         elif layout == "HWCN":
             assert kernel_layout == "HWIO"
             strategy.add_implementation(
@@ -160,6 +164,11 @@ def conv2d_strategy_cuda(attrs, inputs, out_type, target):
                 wrap_topi_schedule(topi.cuda.schedule_conv2d_nhwc),
                 name="conv2d_nhwc.cuda",
             )
+
+            strategy.add_auto_scheduler(
+                wrap_compute_conv2d(topi.nn.conv2d_nhwc), name="conv2d_nhwc"
+            )
+
             N, H, W, _ = get_const_tuple(data.shape)
             KH, KW, CI, CO = get_const_tuple(kernel.shape)
             # Winograd shape related judgment
@@ -266,11 +275,21 @@ def conv2d_strategy_cuda(attrs, inputs, out_type, target):
                 wrap_topi_schedule(topi.cuda.schedule_depthwise_conv2d_nchw),
                 name="depthwise_conv2d_nchw.cuda",
             )
+
+            strategy.add_auto_scheduler(
+                wrap_compute_conv2d(topi.nn.depthwise_conv2d_nchw),
+                name="depthwise_conv2d_nchw.cuda",
+            )
         elif layout == "NHWC":
             assert kernel_layout == "HWOI"
             strategy.add_implementation(
                 wrap_compute_conv2d(topi.nn.depthwise_conv2d_nhwc),
                 wrap_topi_schedule(topi.cuda.schedule_depthwise_conv2d_nhwc),
+                name="depthwise_conv2d_nhwc.cuda",
+            )
+
+            strategy.add_auto_scheduler(
+                wrap_compute_conv2d(topi.nn.depthwise_conv2d_nhwc),
                 name="depthwise_conv2d_nhwc.cuda",
             )
         else:
@@ -458,6 +477,11 @@ def conv3d_strategy_cuda(attrs, inputs, out_type, target):
                 name="conv3d_ncdhw_winograd.cuda",
                 plevel=5,
             )
+
+        strategy.add_auto_scheduler(
+            wrap_compute_conv3d(topi.nn.conv3d_ncdhw),
+            name="conv3d_ncdhw.cuda",
+        )
     else:  # layout == "NDHWC":
         strategy.add_implementation(
             wrap_compute_conv3d(topi.cuda.conv3d_ndhwc),
@@ -480,6 +504,11 @@ def conv3d_strategy_cuda(attrs, inputs, out_type, target):
                         name="conv3d_ndhwc_tensorcore.cuda",
                         plevel=20,
                     )
+
+        strategy.add_auto_scheduler(
+            wrap_compute_conv3d(topi.nn.conv3d_ndhwc),
+            name="conv3d_ndhwc.cuda",
+        )
 
     if target.kind.name == "cuda" and "cudnn" in target.libs:
         strategy.add_implementation(
@@ -575,6 +604,12 @@ def dense_strategy_cuda(attrs, inputs, out_type, target):
             wrap_topi_schedule(topi.cuda.schedule_dense_small_batch),
             name="dense_small_batch.cuda",
         )
+
+        strategy.add_auto_scheduler(
+            wrap_compute_dense(topi.nn.dense),
+            name="dense",
+        )
+
         with SpecializedCondition(b >= 32):
             strategy.add_implementation(
                 wrap_compute_dense(topi.cuda.dense_large_batch),
@@ -651,6 +686,32 @@ def sparse_dense_padded_strategy_cuda(attrs, inputs, out_type, target):
     return strategy
 
 
+@scatter_strategy.register(["cuda", "gpu"])
+def scatter_cuda(attrs, inputs, out_type, target):
+    """scatter cuda strategy"""
+    strategy = _op.OpStrategy()
+    strategy.add_implementation(
+        wrap_compute_scatter(topi.cuda.scatter),
+        wrap_topi_schedule(topi.generic.schedule_extern),
+        name="scatter.cuda",
+        plevel=10,
+    )
+    return strategy
+
+
+@scatter_add_strategy.register(["cuda", "gpu"])
+def scatter_add_cuda(attrs, inputs, out_type, target):
+    """scatter_add cuda strategy"""
+    strategy = _op.OpStrategy()
+    strategy.add_implementation(
+        wrap_compute_scatter(topi.cuda.scatter_add),
+        wrap_topi_schedule(topi.generic.schedule_extern),
+        name="scatter_add.cuda",
+        plevel=10,
+    )
+    return strategy
+
+
 @argsort_strategy.register(["cuda", "gpu"])
 def argsort_strategy_cuda(attrs, inputs, out_type, target):
     """argsort cuda strategy"""
@@ -660,7 +721,9 @@ def argsort_strategy_cuda(attrs, inputs, out_type, target):
         wrap_topi_schedule(topi.cuda.schedule_argsort),
         name="argsort.cuda",
     )
-    if get_global_func("tvm.contrib.thrust.sort", allow_missing=True):
+    if target.kind.name == "cuda" and get_global_func(
+        "tvm.contrib.thrust.sort", allow_missing=True
+    ):
         strategy.add_implementation(
             wrap_compute_argsort(topi.cuda.argsort_thrust),
             wrap_topi_schedule(topi.cuda.schedule_argsort),
@@ -679,7 +742,9 @@ def topk_strategy_cuda(attrs, inputs, out_type, target):
         wrap_topi_schedule(topi.cuda.schedule_topk),
         name="topk.cuda",
     )
-    if get_global_func("tvm.contrib.thrust.sort", allow_missing=True):
+    if target.kind.name == "cuda" and get_global_func(
+        "tvm.contrib.thrust.sort", allow_missing=True
+    ):
         strategy.add_implementation(
             wrap_compute_topk(topi.cuda.topk_thrust),
             wrap_topi_schedule(topi.cuda.schedule_topk),

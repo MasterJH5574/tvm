@@ -450,6 +450,7 @@ std::vector<std::pair<State, int>> RuleSpecialComputeLocationGPU::Apply(
 
 PopulationGenerationRule::ResultKind InitFillTileSize::Apply(SketchPolicyNode* policy, State* state,
                                                              std::mt19937* rand_gen) const {
+  SplitFactorizationMemo split_memo;
   int max_innermost_split_factor =
       GetIntParam(policy->params, SketchParamKey::max_innermost_split_factor);
 
@@ -470,8 +471,9 @@ PopulationGenerationRule::ResultKind InitFillTileSize::Apply(SketchPolicyNode* p
 
       ICHECK(ps->extent);
       int extent = GetIntImm(ps->extent.value());
-      const auto& candidate_lens = policy->split_memo.GetFactorizationSchemes(
-          extent, ps->lengths.size(), max_innermost_split_factor);
+      const auto& candidate_lens = split_memo.GetFactorizationSchemes(extent, ps->lengths.size(),
+                                                                      max_innermost_split_factor);
+      ICHECK(!candidate_lens.empty());
       const auto& candidate_lengths = candidate_lens[(*rand_gen)() % candidate_lens.size()];
 
       pstate->transform_steps.Set(
@@ -998,10 +1000,14 @@ PopulationGenerationRule::ResultKind MutateAutoUnroll::Apply(SketchPolicyNode* p
   ICHECK(ps);
 
   // Mutate its value to a random candidates
-  auto val = std::to_string(auto_unroll_configs[(*rand_gen)() % auto_unroll_configs.size()]);
+  int val = auto_unroll_configs[(*rand_gen)() % auto_unroll_configs.size()];
   StateNode* pstate = state->CopyOnWrite();
-  pstate->transform_steps.Set(step_id, PragmaStep(ps->stage_id, ps->iter_id,
-                                                  std::string("auto_unroll_max_step") + "$" + val));
+  pstate->transform_steps.Set(
+      step_id, PragmaStep(ps->stage_id, ps->iter_id,
+                          std::string("auto_unroll_max_step") + "$" + std::to_string(val)));
+  Stage new_stage = pstate->stages[ps->stage_id];
+  new_stage.CopyOnWrite()->attrs.auto_unroll_max_step = val;
+  pstate->stages.Set(ps->stage_id, new_stage);
   return ResultKind::kValid;
 }
 
