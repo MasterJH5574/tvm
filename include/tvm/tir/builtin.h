@@ -537,17 +537,17 @@ TVM_DLL const Op& tvm_store_matrix_sync();
  * \brief tvm intrinsic for tensor core ptx mma.sync.
  *
  *  void tvm_ptx_mma_sync(Var fragment_d, Expr index_d,
- *                         Var fragment_a, Expr index_a,
- *                         Var fragment_b, Expr index_b,
- *                         Var fragment_c, Expr index_c) {
- *                         asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5},
- *                         {%6}, {%7,%8,%9,%10};\n":
- *                         "=f"(fragment_d[index_d*4]), "=f"(fragment_d[index_d*4+1]),
- *                         "=f"(fragment_d[index_d*4+2]), "=f"(fragment_d[index_d*4+3]):
- *                         "r"(fragment_a[index_a*2]), "r"(fragmentA[index_a*2+1]),
- *                         "r"(fragment_b[index_b]),
- *                         "f"(fragment_c[4*index_c]), "f"(fragment_c[4*index_c+1]),
- *                         "f"(fragment_c[4*index_c+2]), "f"(fragment_c[4*index_c+3]));
+ *                        Var fragment_a, Expr index_a,
+ *                        Var fragment_b, Expr index_b,
+ *                        Var fragment_c, Expr index_c) {
+ *    asm volatile("mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0, %1, %2, %3}, {%4, %5},
+ *    {%6}, {%7, %8, %9, %10};\n":
+ *    "=f"(fragment_d[index_d * 4]), "=f"(fragment_d[index_d * 4 + 1]),
+ *    "=f"(fragment_d[index_d * 4 + 2]), "=f"(fragment_d[index_d * 4 + 3]):
+ *    "r"(fragment_a[index_a * 2]), "r"(fragmentA[index_a * 2 + 1]),
+ *    "r"(fragment_b[index_b]),
+ *    "f"(fragment_c[4 * index_c]), "f"(fragment_c[4 * index_c + 1]),
+ *    "f"(fragment_c[4 * index_c + 2]), "f"(fragment_c[4 * index_c + 3]));
  *  }
  */
 TVM_DLL const Op& tvm_ptx_mma_sync();
@@ -555,15 +555,15 @@ TVM_DLL const Op& tvm_ptx_mma_sync();
 /*!
  * \brief tvm intrinsic for tensor core ldmatrix operators.
  *
- *  void tvm_ldmatrix_sync(Var fragment, Expr index,
- *                             UIntImm trans, Expr buffer_ptr, Expr stride) {
- *     //matrix_num=1 (no trans)
- *     asm volatile ("
- *     .reg .u32 smem_ptr; .reg .u64 smem_ptr_long;
- *     cvta.to.shared.u64 smem_ptr_long, %0; cvt.u32.u64 smem_ptr, smem_ptr_long;
- *     ldmatrix.sync.aligned.m8n8.x1.shared.b16 {%1}, [smem_ptr];"
- *               : "=r"(buffer_ptr+threadIdx.x%8*stride)
- *               :"r"(fragment[index]));
+ *  void tvm_ldmatrix_x1_sync(Var fragment, Expr index,
+ *                            UIntImm trans, Expr buffer_ptr, Expr stride) {
+ *    //matrix_num=1 (no trans)
+ *    asm volatile ("
+ *    .reg .u32 smem_ptr; .reg .u64 smem_ptr_long;
+ *    cvta.to.shared.u64 smem_ptr_long, %0; cvt.u32.u64 smem_ptr, smem_ptr_long;
+ *    ldmatrix.sync.aligned.m8n8.x1.shared.b16 {%1}, [smem_ptr];"
+ *              : "=r"(buffer_ptr + threadIdx.x % 8 * stride)
+ *              : "r"(fragment[index]));
  *  }
  */
 TVM_DLL const Op& tvm_ldmatrix_x1_sync();
@@ -571,17 +571,25 @@ TVM_DLL const Op& tvm_ldmatrix_x1_sync();
 /*!
  * \brief tvm intrinsic for tensor core ldmatrix operators.
  *
- *  void tvm_ldmatrix_sync(Var fragment, Expr index,
- *                             UIntImm trans, Expr buffer_ptr, Expr stride) {
- *     asm volatile ("
- *     .reg .u32 smem_ptr; .reg .u64 smem_ptr_long;
- *     cvta.to.shared.u64 smem_ptr_long, %0; cvt.u32.u64 smem_ptr, smem_ptr_long;
- *     ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%1,%2}, [smem_ptr];"
- *               : "=r"(buffer_ptr+threadIdx.x%16*stride)
- *               :"r"(fragment[2*index]),"r"(fragment[2*index+1]));
+ *  void tvm_ldmatrix_x2_sync(Var fragment, Expr index,
+ *                            UIntImm trans, Expr buffer_ptr, Expr stride) {
+ *    asm volatile ("
+ *    .reg .u32 smem_ptr; .reg .u64 smem_ptr_long;
+ *    cvta.to.shared.u64 smem_ptr_long, %0; cvt.u32.u64 smem_ptr, smem_ptr_long;
+ *    ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%1, %2}, [smem_ptr];"
+ *              : "=r"(buffer_ptr + threadIdx.x % 16 * stride)
+ *              : "r"(fragment[2 * index]), "r"(fragment[2 * index + 1]));
  *  }
  */
 TVM_DLL const Op& tvm_ldmatrix_x2_sync();
+
+
+/*!
+ * \brief tvm intrinsic for tensor core operation of storing matrix.
+ *
+ *  Todo
+ */
+TVM_DLL const Op& tvm_stmatrix_sync();
 
 // TODO(tvm-team) replace the usage of the vector operations by Shuffle.
 /*!

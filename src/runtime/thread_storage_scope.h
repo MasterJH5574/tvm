@@ -57,6 +57,12 @@ enum class StorageRank {
   kWMMAMatrixB = 5,
   /*! \brief wmma scope memory of accumulator */
   kWMMAAccumulator = 6,
+  /*! \brief mma scope memory of matrix_a */
+  kMMAMatrixA = 7,
+  /*! \brief mma scope memory of matrix_b */
+  kMMAMatrixB = 8,
+  /*! \brief mma scope memory of accumulator */
+  kMMAAccumulator = 9,
 };
 
 /*!
@@ -106,6 +112,12 @@ struct StorageScope {
         return "wmma.matrix_b" + tag;
       case StorageRank::kWMMAAccumulator:
         return "wmma.accumulator" + tag;
+      case StorageRank::kMMAMatrixA:
+        return "mma.matrix_a" + tag;
+      case StorageRank::kMMAMatrixB:
+        return "mma.matrix_b" + tag;
+      case StorageRank::kMMAAccumulator:
+        return "mma.accumulator" + tag;
       default:
         LOG(FATAL) << "unknown storage scope";
         return "";
@@ -139,6 +151,15 @@ struct StorageScope {
     } else if (s.compare(0, 16, "wmma.accumulator") == 0) {
       r.rank = StorageRank::kWMMAAccumulator;
       r.tag = s.substr(16, std::string::npos);
+    } else if (s.compare(0, 12, "mma.matrix_a") == 0) {
+      r.rank = StorageRank::kMMAMatrixA;
+      r.tag = s.substr(12, std::string::npos);
+    } else if (s.compare(0, 12, "mma.matrix_b") == 0) {
+      r.rank = StorageRank::kMMAMatrixB;
+      r.tag = s.substr(12, std::string::npos);
+    } else if (s.compare(0, 15, "mma.accumulator") == 0) {
+      r.rank = StorageRank::kMMAAccumulator;
+      r.tag = s.substr(15, std::string::npos);
     } else {
       LOG(FATAL) << "unknown storage scope " << s;
     }
