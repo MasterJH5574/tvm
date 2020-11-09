@@ -553,6 +553,85 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       this->PrintExpr(op->args[i * 2 + 1], os);
       os << "]" << ((i < 3) ? ", " : ")");
     }
+  } else if(op->op.same_as(builtin::tvm_ldmatrix_x1_sync())){
+    need_mma_h = false;
+    ICHECK_EQ(op->args.size(), 5U);
+    //todo:implement trans
+    os << "asm volatile (\"\n"
+          ".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\n"
+          " cvta.to.shared.u64 smem_ptr_long, %0; cvt.u32.u64 smem_ptr, smem_ptr_long;\n"
+          " ldmatrix.sync.aligned.m8n8.x1.shared.b16 {%1}, [smem_ptr];\""
+          ": \"=r\"(";
+    this->PrintExpr(op->args[3],os);
+    os << "+threadIdx.x%8*";
+    this->PrintExpr(op->args[4],os);
+    os << ")\n"
+          ":\"r\"(";
+    this->PrintExpr(op->args[0],os);
+    os << "[";
+    this->PrintExpr(op->args[1],os);
+    os << "]));";
+  } else if(op->op.same_as(builtin::tvm_ldmatrix_x2_sync())){
+      need_mma_h = false;
+      ICHECK_EQ(op->args.size(), 5U);
+      //todo:implement trans
+      os << "asm volatile (\"\n"
+            ".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\n"
+            " cvta.to.shared.u64 smem_ptr_long, %0; cvt.u32.u64 smem_ptr, smem_ptr_long;\n"
+            " ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%1,%2}, [smem_ptr];\""
+            ": \"=r\"(";
+      this->PrintExpr(op->args[3],os);
+      os << "+threadIdx.x%16*";
+      this->PrintExpr(op->args[4],os);
+      os << ")\n"
+            ":\"r\"(";
+      this->PrintExpr(op->args[0],os);
+      os << "[2*";
+      this->PrintExpr(op->args[1],os);
+      os << "]),\"r\"(";
+      this->PrintExpr(op->args[0],os);
+      os << "[2*";
+      this->PrintExpr(op->args[1],os);
+      os << "+1]));"
+  } else if (op->op.same_as(builtin::tvm_ptx_mma_sync())){
+      os << "asm volatile(\"mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5},\n"
+            "                          {%6}, {%7,%8,%9,%10};\\n\":\n";
+      for (int i = 0; i < 4; i++){
+          os << " \"=f\"(";
+          this->PrintExpr(op->args[0],os);
+          os << "[";
+          this->PrintExpr(op->args[1],os);
+          os << "*4+" << i << "])";
+          if (i == 3){
+              os << ":";
+          } else{
+              os << ",";
+          }
+      }
+      for (int i = 0; i < 2; i++){
+          os << "\"r\"(";
+          this->PrintExpr(op->args[2],os);
+          os << "[";
+          this->PrintExpr(op->args[3],os);
+          os << "*2+" << i << "]),";
+      }
+      os << "\"r\"(";
+      this->PrintExpr(op->args[4],os);
+      os << "[";
+      this->PrintExpr(op->args[5],os);
+      os << "]),";
+      for(int i = 0; i < 4; i++){
+          os << " \"=f\"(";
+          this->PrintExpr(op->args[6],os);
+          os << "[";
+          this->PrintExpr(op->args[7],os);
+          os << "*4+" << i << "])";
+          if (i == 3){
+              os << ":";
+          } else{
+              os << ");";
+          }
+      }
   } else {
     CodeGenC::VisitExpr_(op, os);
   }

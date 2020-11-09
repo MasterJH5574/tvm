@@ -219,6 +219,15 @@ TIR_DEFINE_BUILTIN_FUNC(tvm_fill_fragment)
 
 TIR_DEFINE_BUILTIN_FUNC(tvm_store_matrix_sync)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+    
+TIR_DEFINE_BUILTIN_FUNC(tvm_ptx_mma_sync)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kOpaque));
+    
+TIR_DEFINE_BUILTIN_FUNC(tvm_ldmatrix_x1_sync)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kReadState));
+    
+TIR_DEFINE_BUILTIN_FUNC(tvm_ldmatrix_x2_sync)
+    .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kReadState));
 
 TIR_DEFINE_BUILTIN_FUNC(vectorhigh)
     .set_attr<TCallEffectKind>("TCallEffectKind", Integer(CallEffectKind::kPure));
