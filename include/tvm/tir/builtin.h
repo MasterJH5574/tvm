@@ -587,7 +587,10 @@ TVM_DLL const Op& tvm_ldmatrix_x2_sync();
 /*!
  * \brief tvm intrinsic for tensor core operation of storing matrix.
  *
- *  Todo
+ *  void tvm_stmatrix_sync(Var fragment,
+ *                             Expr index, Expr buffer_ptr, Expr stride) {
+ *    store_fragment(fragment[index],buffer_ptr,stride);
+ *  }
  */
 TVM_DLL const Op& tvm_stmatrix_sync();
 

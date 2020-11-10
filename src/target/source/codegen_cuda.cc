@@ -78,7 +78,12 @@ std::string CodeGenCUDA::Finish() {
   if (need_mma_h_) {
     decl_stream << "#include <mma.h>\n";
   }
-
+  if(need_store_fragment_) {
+      decl_stream << "__device__ inline void store_fragment(Type_C fragmentC[4], Type_C* buffer, int stride){\n"
+                     "    ((float2*)buffer)[0]=((float2*)fragmentC)[0];\n"
+                     "    ((float2*)(buffer+mma_x/2*stride))[0]=((float2*)fragmentC)[1];\n"
+                     "}";
+  }
   return CodeGenC::Finish();
 }
 
@@ -554,7 +559,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       os << "]" << ((i < 3) ? ", " : ")");
     }
   } else if(op->op.same_as(builtin::tvm_ldmatrix_x1_sync())){
-    need_mma_h = false;
+    need_mma_h_ = false;
     ICHECK_EQ(op->args.size(), 5U);
     //todo:implement trans
     os << "asm volatile (\"\n"
@@ -572,7 +577,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->PrintExpr(op->args[1],os);
     os << "]));";
   } else if(op->op.same_as(builtin::tvm_ldmatrix_x2_sync())){
-      need_mma_h = false;
+      need_mma_h_ = false;
       ICHECK_EQ(op->args.size(), 5U);
       //todo:implement trans
       os << "asm volatile (\"\n"
@@ -592,8 +597,9 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       this->PrintExpr(op->args[0],os);
       os << "[2*";
       this->PrintExpr(op->args[1],os);
-      os << "+1]));"
+      os << "+1]));";
   } else if (op->op.same_as(builtin::tvm_ptx_mma_sync())){
+      need_mma_h_ = false;
       os << "asm volatile(\"mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5},\n"
             "                          {%6}, {%7,%8,%9,%10};\\n\":\n";
       for (int i = 0; i < 4; i++){
@@ -632,6 +638,18 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
               os << ");";
           }
       }
+  } else if (op->op.same_as(builtin::tvm_stmatrix_sync())){
+      need_store_fragment_=true;
+      CHECK_EQ(op->args.size(), 4U);
+      os << "store_fragment(";
+      this->PrintExpr(op->args[0], os);
+      os << "[";
+      this->PrintExpr(op->args[1], os);
+      os << "], ";
+      this->PrintExpr(op->args[2], os);
+      os << ", ";
+      this->PrintExpr(op->args[3], os);
+      os << ")";
   } else {
     CodeGenC::VisitExpr_(op, os);
   }
