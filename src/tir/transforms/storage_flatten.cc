@@ -110,6 +110,13 @@ class StorageFlattener : public StmtExprMutator {
       vinfo[dim].align_factor = tuple->args[1].as<IntImmNode>()->value;
       vinfo[dim].align_offset = tuple->args[2].as<IntImmNode>()->value;
       return this->VisitStmt(op->body);
+    } else if (op->attr_key == attr::swizzle) {
+      auto buffer = Downcast<tir::Buffer>(op->node);
+      const CallNode* tuple = op->value.as<CallNode>();
+      ICHECK(tuple && tuple->op.same_as(builtin::tvm_tuple()));
+      auto& vinfo = swizzle_map_[buffer];
+      vinfo = true;
+      return this->VisitStmt(op->body);
     }
     return StmtExprMutator::VisitStmt_(op);
   }
@@ -199,11 +206,34 @@ class StorageFlattener : public StmtExprMutator {
         }
         strides = Array<PrimExpr>(rstrides.rbegin(), rstrides.rend());
       }
-
+      bool swizzle = false;
+  
+      PrimExpr allocate_size;
+      if (swizzle_map_.count(key) != 0 && shape.size() != 0) {
+        swizzle = true;
+        if (strides.size() != 0) {
+          int first_dim = 0;
+          int last_dim = strides.size() - 1;
+          allocate_size = strides[first_dim] * shape[first_dim];
+          allocate_size = allocate_size + allocate_size / strides[last_dim - 1] /
+                                              make_const(DataType::Int(32), 2) *
+                                              make_const(DataType::Int(32), 8);
+        } else {
+          int last_dim = shape.size() - 1;
+          allocate_size = make_const(DataType::Int(32), 1);
+          for (size_t i = 0; i < shape.size() - 1; i++) {
+            allocate_size = allocate_size * shape[i];
+          }
+  
+          allocate_size =
+              allocate_size * shape[last_dim] +
+              allocate_size / make_const(DataType::Int(32), 2) * make_const(DataType::Int(32), 8);
+        }
+      }
+  
       e.buffer = Buffer(Var(op->buffer->data->name_hint, op->buffer->data->type_annotation),
                         op->buffer->dtype, shape, strides, PrimExpr(), op->buffer->name,
-                        skey.to_string(), align, 0, kDefault);
-
+                        skey.to_string(), align, 0, kDefault, swizzle);
       buf_map_[key] = e;
       Stmt body = this->VisitStmt(op->body);
       buf_map_[key].released = true;
@@ -217,11 +247,20 @@ class StorageFlattener : public StmtExprMutator {
       }
       if (strides.size() != 0) {
         int first_dim = 0;
+        if (swizzle) {
+          shape = {allocate_size};
+        } else {
+          shape = {e.buffer->strides[first_dim] * e.buffer->shape[first_dim]};
+        }
         ret = Allocate(e.buffer->data, storage_type,
-                       {e.buffer->strides[first_dim] * e.buffer->shape[first_dim]},
+                       shape,
                        make_const(DataType::Bool(e.buffer->dtype.lanes()), true), body);
       } else {
-        shape = e.buffer->shape;
+        if (swizzle) {
+          shape = {allocate_size};
+        } else {
+          shape = e.buffer->shape;
+        }
         if (shape.size() == 0) {
           shape.push_back(make_const(DataType::Int(32), 1));
         }
@@ -491,6 +530,8 @@ class StorageFlattener : public StmtExprMutator {
   std::unordered_map<Buffer, BufferEntry, ObjectPtrHash, ObjectPtrEqual> buf_map_;
   // Dimension alignment
   std::unordered_map<Buffer, std::vector<DimAlignInfo>, ObjectPtrHash, ObjectPtrEqual> dim_align_;
+  // Swizzle On/Off
+  std::unordered_map<Buffer, bool, ObjectPtrHash, ObjectPtrEqual> swizzle_map_;
   // Storage scope
   std::unordered_map<const Object*, std::string> storage_scope_;
   // The current thread scope.

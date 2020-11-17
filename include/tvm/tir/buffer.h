@@ -75,6 +75,8 @@ class BufferNode : public Object {
    *  elem_offset is guaranteed to be multiple of offset_factor.
    */
   int offset_factor;
+  /*! \brief whether to use swizzle*/
+  bool swizzle;
   /*! \brief buffer type */
   BufferType buffer_type;
   /*! \brief constructor */
@@ -135,7 +137,7 @@ class Buffer : public ObjectRef {
   // A default value will be picked.
   TVM_DLL Buffer(Var ptr, DataType dtype, Array<PrimExpr> shape, Array<PrimExpr> strides,
                  PrimExpr elem_offset, String name, String scope, int data_alignment,
-                 int offset_factor, BufferType buffer_type);
+                 int offset_factor, BufferType buffer_type,bool swizzle=false);
 
   /*!
    * \brief Return a new buffer that is equivalent with current one

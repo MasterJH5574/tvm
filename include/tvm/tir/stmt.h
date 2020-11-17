@@ -921,6 +921,8 @@ constexpr const char* scan_init_scope = "scan_init_scope";
 constexpr const char* buffer_dim_align = "buffer_dim_align";
 /*! \brief Mark stores/loads with theirs bounds.  */
 constexpr const char* buffer_bound = "buffer_bound";
+/*! \brief Mark whether to swizzle the share memory*/
+constexpr const char* swizzle = "swizzle";
 /*!
  * \brief Bind the buffer specification to the region of the op
  *  When this scope occurs, the stmt.node is a Array<NodeRef> = [buffer, tensor]

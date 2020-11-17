@@ -481,6 +481,8 @@ class StageNode : public Object {
   bool is_output{false};
   /*! \brief Whether apply double buffer optimization to this stage */
   bool double_buffer{false};
+  /*! \brief Whether apply swizzle optimization to this stage*/
+  bool swizzle{false};
   /*!
    * \brief The parent group of the current stage.
    *  The stage cannot be assigned to stages outside the group.

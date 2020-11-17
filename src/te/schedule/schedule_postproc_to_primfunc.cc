@@ -85,7 +85,8 @@ class TensorToBufferMapper : public StmtExprMutator {
       return AttrStmt(Array<ObjectRef>{tuple[0], GetOrAllocBuffer(tensor)}, op->attr_key, op->value,
                       op->body);
     } else if (op->attr_key == tir::attr::buffer_dim_align ||
-               op->attr_key == tir::attr::prefetch_scope) {
+               op->attr_key == tir::attr::prefetch_scope ||
+               op->attr_key == tir::attr::swizzle) {
       Tensor tensor = Downcast<Tensor>(op->node);
       Buffer buffer = GetOrAllocBuffer(tensor);
       return AttrStmt(buffer, op->attr_key, op->value, op->body);
@@ -98,9 +99,11 @@ class TensorToBufferMapper : public StmtExprMutator {
     Tensor tensor = Downcast<Tensor>(op->producer);
     Buffer buffer = GetOrAllocBuffer(tensor);
 
+
     auto ret = StmtExprMutator::VisitStmt_(op);
     op = ret.as<ProducerRealizeNode>();
-
+    std::cout<<"postproc_to_primfunc body:"<<op->body<<std::endl<<"tensor:"<<tensor<<
+        std::endl<<std::endl;
     return BufferRealize(buffer, op->bounds, op->condition, op->body);
   }
 

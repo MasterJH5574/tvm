@@ -424,6 +424,9 @@ class BufferAnalyser : public StmtExprVisitor {
       vinfo[dim].align_factor = tuple->args[1].as<IntImmNode>()->value;
       vinfo[dim].align_offset = tuple->args[2].as<IntImmNode>()->value;
       this->VisitStmt(op->body);
+    } else if (op->attr_key == tir::attr::swizzle){
+      LOG(FATAL) << "Cannot handle Swizzle. "
+                 << " please disable tensor core rewrite";
     } else {
       StmtExprVisitor::VisitStmt_(op);
     }

@@ -198,7 +198,7 @@ class SchedulePostProc : public StmtExprMutator {
           return this->VisitStmt(op->body);
         }
       }
-    } else if (op->attr_key == tir::attr::buffer_dim_align) {
+    } else if (op->attr_key == tir::attr::buffer_dim_align || op->attr_key == tir::attr::swizzle) {
       Tensor tensor = Downcast<Tensor>(op->node);
       auto it = replace_op_.find(tensor->op.get());
       if (it != replace_op_.end()) {

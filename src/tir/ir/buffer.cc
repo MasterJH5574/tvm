@@ -250,8 +250,18 @@ inline PrimExpr ElemOffset(const BufferNode* n, Array<PrimExpr> index) {
       ICHECK_EQ(n->shape.size(), index.size());
       if (index.size() > 0) {
         PrimExpr offset = index[0];
-        for (size_t i = 1; i < index.size(); ++i) {
+        for (size_t i = 1; i < index.size()-1; ++i) {
           offset = MergeMulMod(&ana, offset * n->shape[i] + index[i]);
+        }
+        //todo(jhy):make the params adjustable
+        if (n->swizzle) {
+          offset = MergeMulMod(
+              &ana, offset* n->shape[index.size() - 1] + offset /
+              make_const(DataType::Int(32), 2)
+              * make_const(DataType::Int(32), 8)+ index[index.size() - 1]);
+        } else {
+          offset = MergeMulMod(
+              &ana, offset* n->shape[index.size() - 1] + index[index.size() - 1]);
         }
         base = base + offset;
       }
@@ -263,9 +273,16 @@ inline PrimExpr ElemOffset(const BufferNode* n, Array<PrimExpr> index) {
     } else {
       base = MergeMulMod(&ana, base + index[0] * n->strides[0]);
     }
-    for (size_t i = 1; i < index.size(); ++i) {
+    for (size_t i = 1; i < index.size() - 1; ++i) {
       base = MergeMulMod(&ana, base + index[i] * n->strides[i]);
     }
+    if(n->swizzle) {
+      //todo(jhy):make the params adjustable
+      base = MergeMulMod(
+          &ana, base + base / n->shape[index.size()-1]/ make_const(DataType::Int(32), 2) *
+                           make_const(DataType::Int(32),8));
+    }
+    base = MergeMulMod(&ana, base + index[index.size() - 1] * n->strides[index.size() - 1]);
   }
   return base;
 }
@@ -382,7 +399,7 @@ PrimExpr Buffer::access_ptr(int access_mask, DataType ptr_type, int content_lane
 
 Buffer::Buffer(Var data, DataType dtype, Array<PrimExpr> shape, Array<PrimExpr> strides,
                PrimExpr elem_offset, String name, String scope, int data_alignment,
-               int offset_factor, BufferType buffer_type) {
+               int offset_factor, BufferType buffer_type, bool swizzle) {
   ICHECK(IsPointerType(data->type_annotation, dtype))
       << "Buffer data field expect to have the right pointer type annotation"
       << " annotation=" << data->type_annotation << ", dtype=" << dtype;
@@ -411,6 +428,7 @@ Buffer::Buffer(Var data, DataType dtype, Array<PrimExpr> shape, Array<PrimExpr> 
   n->data_alignment = data_alignment;
   n->offset_factor = offset_factor;
   n->buffer_type = buffer_type;
+  n->swizzle = swizzle;
   if (n->buffer_type == kAutoBroadcast && n->shape.size() > 0 && n->strides.empty()) {
     for (size_t i = 0; i < n->shape.size(); ++i) {
       n->strides.push_back(Var("stride", n->shape[i].dtype()));

@@ -284,6 +284,12 @@ Stmt BaseComputeOpNode::BuildRealize(const Stage& stage,
         }
       }
     }
+    //todo:this is just a test
+    if (stage->swizzle || stage->scope=="shared") {
+      realize = tir::AttrStmt(t, tir::attr::swizzle,
+                            Call(DataType::Handle(), tir::builtin::tvm_tuple(),Array<PrimExpr>()),
+                                realize);
+    }
   }
   return realize;
 }
