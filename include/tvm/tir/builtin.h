@@ -553,9 +553,19 @@ TVM_DLL const Op& tvm_store_matrix_sync();
 TVM_DLL const Op& tvm_ptx_mma_sync();
 
 /*!
+ * \brief tvm intrinsic for fragment initialization.
+ *
+ *  void tvm_mma_fragment_initialize(Var fragment, Expr index) {
+ *    fragment[index] = 0;
+ *  }
+ */
+TVM_DLL const Op& tvm_mma_fragment_initialize();
+
+/*!
  * \brief tvm intrinsic for tensor core ldmatrix operators.
  *
  *  void tvm_ldmatrix_x1_sync(Var fragment, Expr index,
+ *                            UIntImm mma_m, UIntImm mma_n, UIntImm mma_k,
  *                            UIntImm trans, Expr buffer_ptr, Expr stride) {
  *    //matrix_num=1 (no trans)
  *    asm volatile ("
@@ -572,6 +582,7 @@ TVM_DLL const Op& tvm_ldmatrix_x1_sync();
  * \brief tvm intrinsic for tensor core ldmatrix operators.
  *
  *  void tvm_ldmatrix_x2_sync(Var fragment, Expr index,
+ *                            UIntImm mma_m, UIntImm mma_n, UIntImm mma_k,
  *                            UIntImm trans, Expr buffer_ptr, Expr stride) {
  *    asm volatile ("
  *    .reg .u32 smem_ptr; .reg .u64 smem_ptr_long;
@@ -587,8 +598,9 @@ TVM_DLL const Op& tvm_ldmatrix_x2_sync();
 /*!
  * \brief tvm intrinsic for tensor core operation of storing matrix.
  *
- *  void tvm_stmatrix_sync(Var fragment,
- *                             Expr index, Expr buffer_ptr, Expr stride) {
+ *  void tvm_stmatrix_sync(Var fragment, Expr index,
+ *                         UIntImm mma_m, UIntImm mma_n, UIntImm mma_k,
+ *                         Expr buffer_ptr, Expr stride) {
  *    store_fragment(fragment[index],buffer_ptr,stride);
  *  }
  */

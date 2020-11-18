@@ -106,6 +106,8 @@ class CodeGenCUDA final : public CodeGenC {
   friend void PrintConst(const FloatImmNode* op, std::ostream& os, CodeGenCUDA* p);
   void PrintWmmaScope(const std::string& scope, DataType t, const VarNode* variable,
                       std::ostream& os);
+  void PrintMmaScope(const std::string& scope, DataType t, const VarNode* variable,
+                     std::ostream& os);
   int32_t GetWmmaFragmentSize(const std::string& scope, const VarNode* variable, int32_t size);
 };
 

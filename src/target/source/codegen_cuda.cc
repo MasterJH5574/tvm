@@ -560,16 +560,16 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     }
   } else if(op->op.same_as(builtin::tvm_ldmatrix_x1_sync())){
     need_mma_h_ = false;
-    ICHECK_EQ(op->args.size(), 5U);
+    ICHECK_EQ(op->args.size(), 8U);
     //todo:implement trans
     os << "asm volatile (\"\n"
           ".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\n"
           " cvta.to.shared.u64 smem_ptr_long, %0; cvt.u32.u64 smem_ptr, smem_ptr_long;\n"
           " ldmatrix.sync.aligned.m8n8.x1.shared.b16 {%1}, [smem_ptr];\""
           ": \"=r\"(";
-    this->PrintExpr(op->args[3],os);
+    this->PrintExpr(op->args[6],os);
     os << "+threadIdx.x%8*";
-    this->PrintExpr(op->args[4],os);
+    this->PrintExpr(op->args[7],os);
     os << ")\n"
           ":\"r\"(";
     this->PrintExpr(op->args[0],os);
@@ -578,16 +578,16 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     os << "]));";
   } else if(op->op.same_as(builtin::tvm_ldmatrix_x2_sync())){
       need_mma_h_ = false;
-      ICHECK_EQ(op->args.size(), 5U);
+      ICHECK_EQ(op->args.size(), 8U);
       //todo:implement trans
       os << "asm volatile (\"\n"
             ".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\n"
             " cvta.to.shared.u64 smem_ptr_long, %0; cvt.u32.u64 smem_ptr, smem_ptr_long;\n"
             " ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%1,%2}, [smem_ptr];\""
             ": \"=r\"(";
-      this->PrintExpr(op->args[3],os);
+      this->PrintExpr(op->args[6],os);
       os << "+threadIdx.x%16*";
-      this->PrintExpr(op->args[4],os);
+      this->PrintExpr(op->args[7],os);
       os << ")\n"
             ":\"r\"(";
       this->PrintExpr(op->args[0],os);
@@ -638,17 +638,24 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
               os << ");";
           }
       }
+  } else if (op->op.same_as(builtin::tvm_mma_fragment_initialize())) {
+    need_mma_h_ = false;
+    ICHECK_EQ(op->args.size(), 2U);
+    this->PrintExpr(op->args[0], os);
+    os << "[";
+    this->PrintExpr(op->args[2], os);
+    os << "] = 0";
   } else if (op->op.same_as(builtin::tvm_stmatrix_sync())){
       need_store_fragment_=true;
-      CHECK_EQ(op->args.size(), 4U);
+      CHECK_EQ(op->args.size(), 7U);
       os << "store_fragment(";
       this->PrintExpr(op->args[0], os);
       os << "[";
       this->PrintExpr(op->args[1], os);
       os << "], ";
-      this->PrintExpr(op->args[2], os);
+      this->PrintExpr(op->args[5], os);
       os << ", ";
-      this->PrintExpr(op->args[3], os);
+      this->PrintExpr(op->args[6], os);
       os << ")";
   } else {
     CodeGenC::VisitExpr_(op, os);
@@ -691,6 +698,17 @@ void CodeGenCUDA::VisitStmt_(const AllocateNode* op) {
     }
     constant_size = GetWmmaFragmentSize(scope, buffer, constant_size);
     PrintWmmaScope(scope, op->dtype, buffer, stream);
+  } else if (scope.find("mma.") == 0) {
+    if (scope == "mma.matrix_a" || scope == "mma.matrix_b") {
+      ICHECK(op->dtype == DataType::Float(16))
+          << "mma.matrix_a and mma.matrix_b only support"
+          << " half type now";
+    } else {
+      ICHECK(op->dtype == DataType::Float(32))
+          << "Accumulator only support half type now";
+    }
+    constant_size = GetWmmaFragmentSize(scope, buffer, constant_size);
+    PrintMmaScope(scope, op->dtype, buffer, stream);
   } else {
     PrintStorageScope(scope, stream);
     PrintType(op->dtype, stream);
@@ -905,6 +923,26 @@ void CodeGenCUDA::PrintWmmaScope(const std::string& scope, DataType t, const Var
   }
 }
 
+void CodeGenCUDA::PrintMmaScope(const std::string& scope, DataType t, const VarNode* variable,
+                                 std::ostream& os) {
+  std::stringstream type;
+  PrintType(t, type);
+  if (scope == "mma.matrix_a") {
+    need_mma_h_ = true;
+    if (t == DataType::Float(16)) {
+      os << "uint32_t";
+    }
+  } else if (scope == "mma.matrix_b") {
+    need_mma_h_ = true;
+    if (t == DataType::Float(16)) {
+      os << "uint32_t";
+    }
+  } else if (scope == "mma.accumulator") {
+    need_mma_h_ = true;
+    os << type.str();
+  }
+}
+
 int32_t CodeGenCUDA::GetWmmaFragmentSize(const std::string& scope, const VarNode* variable,
                                          int32_t size) {
   std::string shape_str = fragment_shapes[variable];
@@ -917,11 +955,11 @@ int32_t CodeGenCUDA::GetWmmaFragmentSize(const std::string& scope, const VarNode
   n = std::stoi(shape_str.substr(last_pos, pos - last_pos));
   last_pos = pos + 2;
   k = std::stoi(shape_str.substr(last_pos, shape_str.length() - last_pos));
-  if (scope == "wmma.matrix_a") {
+  if (scope == "wmma.matrix_a" || scope == "mma.matrix_a") {
     return size / m / k;
-  } else if (scope == "wmma.matrix_b") {
+  } else if (scope == "wmma.matrix_b" || scope == "mma.matrix_b") {
     return size / n / k;
-  } else if (scope == "wmma.accumulator") {
+  } else if (scope == "wmma.accumulator" || scope == "mma.accumulator") {
     return size / m / n;
   }
   return 0;
