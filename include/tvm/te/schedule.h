@@ -252,6 +252,11 @@ class Stage : public ObjectRef {
    */
   TVM_DLL Stage& double_buffer();  // NOLINT(*)
   /*!
+   * \brief Compute current stage with swizzle.
+   * \return reference to self.
+   */
+  TVM_DLL Stage& swizzle(); //NOLINT(*)
+  /*!
    * \brief whether the stage has been scheduled.
    * \return whether the stage has been scheduled.
    */
@@ -507,6 +512,7 @@ class StageNode : public Object {
     v->Visit("double_buffer", &double_buffer);
     v->Visit("group", &group);
     v->Visit("num_child_stages", &num_child_stages);
+    v->Visit("swizzle", &swizzle);
   }
 
   static constexpr const char* _type_key = "Stage";

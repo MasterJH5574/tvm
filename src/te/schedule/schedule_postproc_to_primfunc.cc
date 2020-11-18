@@ -102,8 +102,6 @@ class TensorToBufferMapper : public StmtExprMutator {
 
     auto ret = StmtExprMutator::VisitStmt_(op);
     op = ret.as<ProducerRealizeNode>();
-    std::cout<<"postproc_to_primfunc body:"<<op->body<<std::endl<<"tensor:"<<tensor<<
-        std::endl<<std::endl;
     return BufferRealize(buffer, op->bounds, op->condition, op->body);
   }
 

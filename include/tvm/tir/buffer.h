@@ -93,6 +93,7 @@ class BufferNode : public Object {
     v->Visit("data_alignment", &data_alignment);
     v->Visit("offset_factor", &offset_factor);
     v->Visit("buffer_type", &buffer_type);
+    v->Visit("swizzle", &swizzle);
   }
 
   bool SEqualReduce(const BufferNode* other, SEqualReducer equal) const {
@@ -101,7 +102,8 @@ class BufferNode : public Object {
     return equal.DefEqual(data, other->data) && equal(dtype, other->dtype) &&
            equal.DefEqual(shape, other->shape) && equal.DefEqual(strides, other->strides) &&
            equal.DefEqual(elem_offset, other->elem_offset) && equal(scope, other->scope) &&
-           equal(data_alignment, other->data_alignment) && equal(buffer_type, other->buffer_type);
+           equal(data_alignment, other->data_alignment) && equal(buffer_type, other->buffer_type) &&
+           equal(swizzle,other->swizzle);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
@@ -113,6 +115,7 @@ class BufferNode : public Object {
     hash_reduce(scope);
     hash_reduce(data_alignment);
     hash_reduce(buffer_type);
+    hash_reduce(swizzle);
   }
 
   /*! \return preferred index type for this buffer node */

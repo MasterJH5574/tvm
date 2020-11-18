@@ -511,7 +511,11 @@ class Stage(Object):
         """
         _ffi_api.StageDoubleBuffer(self)
 
-
+    def swizzle(self):
+        """
+        Compute the current stage via swizzle.
+        """
+        _ffi_api.StageSwizzle(self)
 @tvm._ffi.register_object
 class SpecializedCondition(Object):
     """Specialized condition to enable op specialization."""
