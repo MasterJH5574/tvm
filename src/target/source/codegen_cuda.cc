@@ -641,7 +641,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       }
   } else if (op->op.same_as(builtin::tvm_mma_fragment_initialize())) {
     need_mma_h_ = false;
-    ICHECK_EQ(op->args.size(), 2U);
+    ICHECK_EQ(op->args.size(), 3U);
     auto dtype_node = op->args[2].as<StringImmNode>();
     ICHECK(dtype_node);
     std::string dtype = dtype_node->value;
@@ -655,15 +655,15 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     }
   } else if (op->op.same_as(builtin::tvm_stmatrix_sync())){
       need_store_fragment_=true;
-      CHECK_EQ(op->args.size(), 7U);
+      CHECK_EQ(op->args.size(), 8U);
       os << "store_fragment_float(";
       this->PrintExpr(op->args[0], os);
       os << "[";
       this->PrintExpr(op->args[1], os);
       os << "], ";
-      this->PrintExpr(op->args[5], os);
-      os << ", ";
       this->PrintExpr(op->args[6], os);
+      os << ", ";
+      this->PrintExpr(op->args[7], os);
       os << ")";
   } else {
     CodeGenC::VisitExpr_(op, os);
