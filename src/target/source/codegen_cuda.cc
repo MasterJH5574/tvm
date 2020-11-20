@@ -79,9 +79,10 @@ std::string CodeGenCUDA::Finish() {
     decl_stream << "#include <mma.h>\n";
   }
   if(need_store_fragment_) {
-      decl_stream << "__device__ inline void store_fragment(Type_C fragmentC[4], Type_C* buffer, int stride){\n"
-                     "    ((float2*)buffer)[0]=((float2*)fragmentC)[0];\n"
-                     "    ((float2*)(buffer+mma_x/2*stride))[0]=((float2*)fragmentC)[1];\n"
+      decl_stream << "__device__ inline void store_fragment_float(float fragmentC[4], float * buffer, int stride){\n"
+                     "    buffer = buffer + threadIdx.x / 4 * stride + threadIdx.x % 4 * 2;\n"
+                     "    ((float2 *) buffer)[0] = ((float2 *) fragmentC)[0];\n"
+                     "    ((float2 *) (buffer + mma_x / 2 * stride))[0] = ((float2 *) fragmentC)[1];\n"
                      "}";
   }
   return CodeGenC::Finish();
@@ -648,7 +649,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
   } else if (op->op.same_as(builtin::tvm_stmatrix_sync())){
       need_store_fragment_=true;
       CHECK_EQ(op->args.size(), 7U);
-      os << "store_fragment(";
+      os << "store_fragment_float(";
       this->PrintExpr(op->args[0], os);
       os << "[";
       this->PrintExpr(op->args[1], os);
@@ -928,17 +929,17 @@ void CodeGenCUDA::PrintMmaScope(const std::string& scope, DataType t, const VarN
   std::stringstream type;
   PrintType(t, type);
   if (scope == "mma.matrix_a") {
-    need_mma_h_ = true;
+    need_mma_h_ = false;
     if (t == DataType::Float(16)) {
       os << "uint32_t";
     }
   } else if (scope == "mma.matrix_b") {
-    need_mma_h_ = true;
+    need_mma_h_ = false;
     if (t == DataType::Float(16)) {
       os << "uint32_t";
     }
   } else if (scope == "mma.accumulator") {
-    need_mma_h_ = true;
+    need_mma_h_ = false;
     os << type.str();
   }
 }
