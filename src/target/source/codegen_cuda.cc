@@ -642,10 +642,17 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
   } else if (op->op.same_as(builtin::tvm_mma_fragment_initialize())) {
     need_mma_h_ = false;
     ICHECK_EQ(op->args.size(), 2U);
-    this->PrintExpr(op->args[0], os);
-    os << "[";
-    this->PrintExpr(op->args[2], os);
-    os << "] = 0";
+    auto dtype_node = op->args[2].as<StringImmNode>();
+    ICHECK(dtype_node);
+    std::string dtype = dtype_node->value;
+
+    if (dtype == "float32") {
+      os << "*((float4 *) (";
+      this->PrintExpr(op->args[0], os);
+      os << "[";
+      this->PrintExpr(op->args[1], os);
+      os << "]) = make_float4(0, 0, 0, 0)";
+    }
   } else if (op->op.same_as(builtin::tvm_stmatrix_sync())){
       need_store_fragment_=true;
       CHECK_EQ(op->args.size(), 7U);
@@ -719,7 +726,13 @@ void CodeGenCUDA::VisitStmt_(const AllocateNode* op) {
       scope == "shared") {
     constant_size = constant_size / (32 / op->dtype.bits());
   }
-  stream << ' ' << vid << '[' << constant_size << "];\n";
+  if (scope.find("mma.") == 0) {
+    stream << ' ' << vid << '[' << constant_size << "];";
+  } else {
+    stream << ' ' << vid << '[' << constant_size << "]";
+    PrintMmaFragmentSize(scope, op->dtype, stream);
+  }
+  stream << "\n";
 
   RegisterHandleType(op->buffer_var.get(), op->dtype);
   this->PrintStmt(op->body);
@@ -942,6 +955,21 @@ void CodeGenCUDA::PrintMmaScope(const std::string& scope, DataType t, const VarN
     need_mma_h_ = false;
     os << type.str();
   }
+}
+
+void CodeGenCUDA::PrintMmaFragmentSize(const std::string& scope, DataType t, std::ostream& os) {
+  if (t == DataType::Float(16)) {
+    if (scope == "mma.matrix_a") {
+      os << "[2]";
+    } else if (scope == "mma.matrix_b") {
+      os << ""; // Print nothing.
+    }
+  } else if (t == DataType::Float(32)) {
+    if (scope == "mma.accumulator") {
+      os << "[4]";
+    }
+  }
+  os << ";";
 }
 
 int32_t CodeGenCUDA::GetWmmaFragmentSize(const std::string& scope, const VarNode* variable,

@@ -555,8 +555,8 @@ TVM_DLL const Op& tvm_ptx_mma_sync();
 /*!
  * \brief tvm intrinsic for fragment initialization.
  *
- *  void tvm_mma_fragment_initialize(Var fragment, Expr index) {
- *    fragment[index] = 0;
+ *  void tvm_mma_fragment_initialize(Var fragment, Expr index, StringImm dtype) {
+ *    (dtypek *) (fragment[index]) = make_dtypek(0, 0, ..., 0);
  *  }
  */
 TVM_DLL const Op& tvm_mma_fragment_initialize();
