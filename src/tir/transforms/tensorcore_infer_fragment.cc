@@ -146,7 +146,7 @@ class FragmentGetter : public StmtExprVisitor {
         FragmentInfo info;
         if (scope == "mma.matrix_a" || scope == "mma.matrix_b") {
           info = FragmentInfo(m->value, n->value, k->value, layout);
-        } else if (scope == "wmma.accumulator") {
+        } else if (scope == "mma.accumulator") {
           info = FragmentInfo(m->value, n->value, k->value, "");
         }
         fragments[buffer_var] = info;
