@@ -79,10 +79,53 @@ std::string CodeGenCUDA::Finish() {
     decl_stream << "#include <mma.h>\n";
   }
   if(need_store_fragment_) {
-      decl_stream << "__device__ inline void store_fragment(Type_C fragmentC[4], Type_C* buffer, int stride){\n"
-                     "    ((float2*)buffer)[0]=((float2*)fragmentC)[0];\n"
-                     "    ((float2*)(buffer+mma_x/2*stride))[0]=((float2*)fragmentC)[1];\n"
-                     "}";
+      decl_stream << "__device__ inline void store_fragment_float(float fragmentC[4], "
+                     "float * buffer, int strides) {\n"
+                     "    buffer = buffer + threadIdx.x / 4 * strides + threadIdx.x % 4 * 2;\n"
+                     "    ((float2 *) buffer)[0] = ((float2 *) fragmentC)[0];\n"
+                     "    ((float2 *) (buffer + 16 / 2 * strides))[0] = ((float2 *) fragmentC)[1];\n"
+                     "}\n\n";
+      decl_stream << "__device__ inline void mma_accumulator_init_float(float4 * ptr) {\n"
+                     "  *ptr = make_float4(0, 0, 0, 0);\n"
+                     "}\n\n";
+      decl_stream << "__device__ inline void mma_ldmatrix_x1_float(half * shared_mem_ptr, "
+                     "int strides, int & fragment) {\n"
+                     "  asm volatile (\n"
+                     "    \"{\\n\"\n"
+                     "    \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
+                     "    \"cvta.to.shared.u64 smem_ptr_long, %1; "
+                     "cvt.u32.u64 smem_ptr, smem_ptr_long;\\n\"\n"
+                     "    \"ldmatrix.sync.aligned.m8n8.x1.shared.b16 {%0}, [smem_ptr];\\n\"\n"
+                     "    \"}\\n\"\n"
+                     "    : \"=r\"(fragment)\n"
+                     "    : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides)\n"
+                     "  );\n"
+                     "}\n\n";
+      decl_stream << "__device__ inline void mma_ldmatrix_x2_float(half * shared_mem_ptr, "
+                     "int strides, int * fragment) {\n"
+                     "  asm volatile (\n"
+                     "    \"{\\n\"\n"
+                     "    \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
+                     "    \"cvta.to.shared.u64 smem_ptr_long, %2; "
+                     "cvt.u32.u64 smem_ptr, smem_ptr_long;\\n\"\n"
+                     "    \"ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0, %1}, [smem_ptr];\\n\"\n"
+                     "    \"}\\n\"\n"
+                     "    : \"=r\"(fragment[0]), "
+                     "\"=r\"(fragment[1])\n"
+                     "    : \"l\"(shared_mem_ptr + threadIdx.x % 16 * strides)\n"
+                     "  );\n"
+                     "}\n\n";
+      decl_stream << "__device__ inline void mma_sync_m16n8k8_161632(float * fragmentD, "
+                     "int * fragmentA, int fragmentB, float * fragmentC) {\n"
+                     "  asm volatile(\"mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 "
+                     "{%0, %1, %2, %3}, {%4, %5}, {%6}, {%7, %8, %9, %10};\\n\"\n"
+                     "    : \"=f\"(fragmentD[0]), \"=f\"(fragmentD[1]), "
+                     "\"=f\"(fragmentD[2]), \"=f\"(fragmentD[3])\n"
+                     "    : \"r\"(fragmentA[0]), \"r\"(fragmentA[1]), \"r\"(fragmentB),\n"
+                     "      \"f\"(fragmentC[0]), \"f\"(fragmentC[1]), "
+                     "\"f\"(fragmentC[2]), \"f\"(fragmentC[3])\n"
+                     "  );\n"
+                     "}\n\n";
   }
   return CodeGenC::Finish();
 }
@@ -560,95 +603,75 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     }
   } else if(op->op.same_as(builtin::tvm_ldmatrix_x1_sync())){
     need_mma_h_ = false;
-    ICHECK_EQ(op->args.size(), 5U);
+    ICHECK_EQ(op->args.size(), 8U);
     //todo:implement trans
-    os << "asm volatile (\"\n"
-          ".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\n"
-          " cvta.to.shared.u64 smem_ptr_long, %0; cvt.u32.u64 smem_ptr, smem_ptr_long;\n"
-          " ldmatrix.sync.aligned.m8n8.x1.shared.b16 {%1}, [smem_ptr];\""
-          ": \"=r\"(";
-    this->PrintExpr(op->args[3],os);
-    os << "+threadIdx.x%8*";
-    this->PrintExpr(op->args[4],os);
-    os << ")\n"
-          ":\"r\"(";
+    os << "mma_ldmatrix_x1_float(";
+    this->PrintExpr(op->args[6],os);
+    os << ", ";
+    this->PrintExpr(op->args[7],os);
+    os << ", ";
     this->PrintExpr(op->args[0],os);
     os << "[";
     this->PrintExpr(op->args[1],os);
-    os << "]));";
+    os << "])";
   } else if(op->op.same_as(builtin::tvm_ldmatrix_x2_sync())){
-      need_mma_h_ = false;
-      ICHECK_EQ(op->args.size(), 5U);
-      //todo:implement trans
-      os << "asm volatile (\"\n"
-            ".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\n"
-            " cvta.to.shared.u64 smem_ptr_long, %0; cvt.u32.u64 smem_ptr, smem_ptr_long;\n"
-            " ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%1,%2}, [smem_ptr];\""
-            ": \"=r\"(";
-      this->PrintExpr(op->args[3],os);
-      os << "+threadIdx.x%16*";
-      this->PrintExpr(op->args[4],os);
-      os << ")\n"
-            ":\"r\"(";
-      this->PrintExpr(op->args[0],os);
-      os << "[2*";
-      this->PrintExpr(op->args[1],os);
-      os << "]),\"r\"(";
-      this->PrintExpr(op->args[0],os);
-      os << "[2*";
-      this->PrintExpr(op->args[1],os);
-      os << "+1]));";
+    need_mma_h_ = false;
+    ICHECK_EQ(op->args.size(), 8U);
+    //todo:implement trans
+    os << "mma_ldmatrix_x2_float(";
+    this->PrintExpr(op->args[6],os);
+    os << ", ";
+    this->PrintExpr(op->args[7],os);
+    os << ", ";
+    this->PrintExpr(op->args[0],os);
+    os << "[";
+    this->PrintExpr(op->args[1],os);
+    os << "])";
   } else if (op->op.same_as(builtin::tvm_ptx_mma_sync())){
-      need_mma_h_ = false;
-      os << "asm volatile(\"mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 {%0,%1,%2,%3}, {%4,%5},\n"
-            "                          {%6}, {%7,%8,%9,%10};\\n\":\n";
-      for (int i = 0; i < 4; i++){
-          os << " \"=f\"(";
-          this->PrintExpr(op->args[0],os);
-          os << "[";
-          this->PrintExpr(op->args[1],os);
-          os << "*4+" << i << "])";
-          if (i == 3){
-              os << ":";
-          } else{
-              os << ",";
-          }
-      }
-      for (int i = 0; i < 2; i++){
-          os << "\"r\"(";
-          this->PrintExpr(op->args[2],os);
-          os << "[";
-          this->PrintExpr(op->args[3],os);
-          os << "*2+" << i << "]),";
-      }
-      os << "\"r\"(";
-      this->PrintExpr(op->args[4],os);
+    need_mma_h_ = false;
+    ICHECK_EQ(op->args.size(), 8U);
+    os << "mma_sync_m16n8k8_161632(";
+    this->PrintExpr(op->args[0],os);
+    os << "[";
+    this->PrintExpr(op->args[1],os);
+    os << "], ";
+    this->PrintExpr(op->args[2],os);
+    os << "[";
+    this->PrintExpr(op->args[3],os);
+    os << "], ";
+    this->PrintExpr(op->args[4],os);
+    os << "[";
+    this->PrintExpr(op->args[5],os);
+    os << "], ";
+    this->PrintExpr(op->args[6],os);
+    os << "[";
+    this->PrintExpr(op->args[7],os);
+    os << "])";
+  } else if (op->op.same_as(builtin::tvm_mma_fragment_initialize())) {
+    need_mma_h_ = false;
+    ICHECK_EQ(op->args.size(), 3U);
+    auto dtype_node = op->args[2].as<StringImmNode>();
+    ICHECK(dtype_node);
+    std::string dtype = dtype_node->value;
+
+    if (dtype == "float32") {
+      os << "mma_accumulator_init_float((float4 *) (";
+      this->PrintExpr(op->args[0], os);
       os << "[";
-      this->PrintExpr(op->args[5],os);
-      os << "]),";
-      for(int i = 0; i < 4; i++){
-          os << " \"=f\"(";
-          this->PrintExpr(op->args[6],os);
-          os << "[";
-          this->PrintExpr(op->args[7],os);
-          os << "*4+" << i << "])";
-          if (i == 3){
-              os << ":";
-          } else{
-              os << ");";
-          }
-      }
+      this->PrintExpr(op->args[1], os);
+      os << "]))";
+    }
   } else if (op->op.same_as(builtin::tvm_stmatrix_sync())){
       need_store_fragment_=true;
-      CHECK_EQ(op->args.size(), 4U);
-      os << "store_fragment(";
+      CHECK_EQ(op->args.size(), 8U);
+      os << "store_fragment_float(";
       this->PrintExpr(op->args[0], os);
       os << "[";
       this->PrintExpr(op->args[1], os);
       os << "], ";
-      this->PrintExpr(op->args[2], os);
+      this->PrintExpr(op->args[6], os);
       os << ", ";
-      this->PrintExpr(op->args[3], os);
+      this->PrintExpr(op->args[7], os);
       os << ")";
   } else {
     CodeGenC::VisitExpr_(op, os);
@@ -691,6 +714,17 @@ void CodeGenCUDA::VisitStmt_(const AllocateNode* op) {
     }
     constant_size = GetWmmaFragmentSize(scope, buffer, constant_size);
     PrintWmmaScope(scope, op->dtype, buffer, stream);
+  } else if (scope.find("mma.") == 0) {
+    if (scope == "mma.matrix_a" || scope == "mma.matrix_b") {
+      ICHECK(op->dtype == DataType::Float(16))
+          << "mma.matrix_a and mma.matrix_b only support"
+          << " half type now";
+    } else {
+      ICHECK(op->dtype == DataType::Float(32))
+          << "Accumulator only support half type now";
+    }
+    constant_size = GetWmmaFragmentSize(scope, buffer, constant_size);
+    PrintMmaScope(scope, op->dtype, buffer, stream);
   } else {
     PrintStorageScope(scope, stream);
     PrintType(op->dtype, stream);
@@ -700,7 +734,13 @@ void CodeGenCUDA::VisitStmt_(const AllocateNode* op) {
       scope == "shared") {
     constant_size = constant_size / (32 / op->dtype.bits());
   }
-  stream << ' ' << vid << '[' << constant_size << "];\n";
+  if (scope.find("mma.") == 0) {
+    stream << ' ' << vid << '[' << constant_size << "]";
+    PrintMmaFragmentSize(scope, op->dtype, stream);
+  } else {
+    stream << ' ' << vid << '[' << constant_size << "];";
+  }
+  stream << "\n";
 
   RegisterHandleType(op->buffer_var.get(), op->dtype);
   this->PrintStmt(op->body);
@@ -905,6 +945,41 @@ void CodeGenCUDA::PrintWmmaScope(const std::string& scope, DataType t, const Var
   }
 }
 
+void CodeGenCUDA::PrintMmaScope(const std::string& scope, DataType t, const VarNode* variable,
+                                 std::ostream& os) {
+  std::stringstream type;
+  PrintType(t, type);
+  if (scope == "mma.matrix_a") {
+    need_mma_h_ = false;
+    if (t == DataType::Float(16)) {
+      os << "int";
+    }
+  } else if (scope == "mma.matrix_b") {
+    need_mma_h_ = false;
+    if (t == DataType::Float(16)) {
+      os << "int";
+    }
+  } else if (scope == "mma.accumulator") {
+    need_mma_h_ = false;
+    os << type.str();
+  }
+}
+
+void CodeGenCUDA::PrintMmaFragmentSize(const std::string& scope, DataType t, std::ostream& os) {
+  if (t == DataType::Float(16)) {
+    if (scope == "mma.matrix_a") {
+      os << "[2]";
+    } else if (scope == "mma.matrix_b") {
+      os << ""; // Print nothing.
+    }
+  } else if (t == DataType::Float(32)) {
+    if (scope == "mma.accumulator") {
+      os << "[4]";
+    }
+  }
+  os << ";";
+}
+
 int32_t CodeGenCUDA::GetWmmaFragmentSize(const std::string& scope, const VarNode* variable,
                                          int32_t size) {
   std::string shape_str = fragment_shapes[variable];
@@ -917,11 +992,11 @@ int32_t CodeGenCUDA::GetWmmaFragmentSize(const std::string& scope, const VarNode
   n = std::stoi(shape_str.substr(last_pos, pos - last_pos));
   last_pos = pos + 2;
   k = std::stoi(shape_str.substr(last_pos, shape_str.length() - last_pos));
-  if (scope == "wmma.matrix_a") {
+  if (scope == "wmma.matrix_a" || scope == "mma.matrix_a") {
     return size / m / k;
-  } else if (scope == "wmma.matrix_b") {
+  } else if (scope == "wmma.matrix_b" || scope == "mma.matrix_b") {
     return size / n / k;
-  } else if (scope == "wmma.accumulator") {
+  } else if (scope == "wmma.accumulator" || scope == "mma.accumulator") {
     return size / m / n;
   }
   return 0;

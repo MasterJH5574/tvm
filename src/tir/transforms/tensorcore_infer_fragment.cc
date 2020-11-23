@@ -114,6 +114,43 @@ class FragmentGetter : public StmtExprVisitor {
         FragmentInfo info(m->value, n->value, k->value, "");
         fragments[buffer_var] = info;
       }
+    } else if (op->op.same_as(builtin::tvm_ldmatrix_x1_sync()) ||
+               op->op.same_as(builtin::tvm_ldmatrix_x2_sync()) ||
+               op->op.same_as(builtin::tvm_stmatrix_sync())) {
+      if (op->op.same_as(builtin::tvm_ldmatrix_x1_sync()) ||
+          op->op.same_as(builtin::tvm_ldmatrix_x2_sync())) {
+        ICHECK_EQ(op->args.size(), 8U);
+      } else {
+        ICHECK_EQ(op->args.size(), 8U);
+      }
+
+      const VarNode* buffer_var = op->args[0].as<VarNode>();
+      ICHECK(buffer_var);
+      const IntImmNode* m = op->args[2].as<IntImmNode>();
+      const IntImmNode* n = op->args[3].as<IntImmNode>();
+      const IntImmNode* k = op->args[4].as<IntImmNode>();
+      ICHECK(m);
+      ICHECK(n);
+      ICHECK(k);
+
+      std::string scope = scopes[buffer_var];
+      std::string layout = scope == "mma.matrix_a" ? "row_major"
+                                                   : (scope == "mma.matrix_b" ? "col_major" : "");
+      if (fragments.count(buffer_var)) {
+        FragmentInfo info = fragments[buffer_var];
+        ICHECK_EQ(m->value, info.m);
+        ICHECK_EQ(n->value, info.n);
+        ICHECK_EQ(k->value, info.k);
+        ICHECK_EQ(layout, info.layout);
+      } else {
+        FragmentInfo info;
+        if (scope == "mma.matrix_a" || scope == "mma.matrix_b") {
+          info = FragmentInfo(m->value, n->value, k->value, layout);
+        } else if (scope == "mma.accumulator") {
+          info = FragmentInfo(m->value, n->value, k->value, "");
+        }
+        fragments[buffer_var] = info;
+      }
     }
   }
 
@@ -141,7 +178,8 @@ class FragmentChecker : public StmtExprVisitor {
   void VisitExpr_(const CallNode* op) final {
     StmtExprVisitor::VisitExpr_(op);
     // Check shape when calling tvm_mma_sync
-    if (op->op.same_as(builtin::tvm_mma_sync()) || op->op.same_as(builtin::tvm_bmma_sync())) {
+    if (op->op.same_as(builtin::tvm_mma_sync()) || op->op.same_as(builtin::tvm_bmma_sync())
+        || op->op.same_as(builtin::tvm_ptx_mma_sync())) {
       ICHECK_EQ(op->args.size(), 8U);
       const VarNode* buffer_var_d = op->args[0].as<VarNode>();
       const VarNode* buffer_var_a = op->args[2].as<VarNode>();
