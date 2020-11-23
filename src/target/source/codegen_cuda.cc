@@ -80,10 +80,10 @@ std::string CodeGenCUDA::Finish() {
   }
   if(need_store_fragment_) {
       decl_stream << "__device__ inline void store_fragment_float(float fragmentC[4], "
-                     "float * buffer, int stride){\n"
-                     "    buffer = buffer + threadIdx.x / 4 * stride + threadIdx.x % 4 * 2;\n"
+                     "float * buffer, int strides) {\n"
+                     "    buffer = buffer + threadIdx.x / 4 * strides + threadIdx.x % 4 * 2;\n"
                      "    ((float2 *) buffer)[0] = ((float2 *) fragmentC)[0];\n"
-                     "    ((float2 *) (buffer + 8 / 2 * stride))[0] = ((float2 *) fragmentC)[1];\n"
+                     "    ((float2 *) (buffer + 16 / 2 * strides))[0] = ((float2 *) fragmentC)[1];\n"
                      "}\n\n";
       decl_stream << "__device__ inline void mma_accumulator_init_float(float4 * ptr) {\n"
                      "  *ptr = make_float4(0, 0, 0, 0);\n"
