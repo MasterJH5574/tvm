@@ -112,7 +112,7 @@ std::string CodeGenCUDA::Finish() {
                      "    \"}\\n\"\n"
                      "    : \"=r\"(fragment[0]), "
                      "\"=r\"(fragment[1])\n"
-                     "    : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides)\n"
+                     "    : \"l\"(shared_mem_ptr + threadIdx.x % 16 * strides)\n"
                      "  );\n"
                      "}\n\n";
       decl_stream << "__device__ inline void mma_sync_m16n8k8_161632(float * fragmentD, "
