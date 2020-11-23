@@ -89,7 +89,7 @@ std::string CodeGenCUDA::Finish() {
                      "  *ptr = make_float4(0, 0, 0, 0);\n"
                      "}\n\n";
       decl_stream << "__device__ inline void mma_ldmatrix_x1_float(half * shared_mem_ptr, "
-                     "int strides, int fragment) {\n"
+                     "int strides, int & fragment) {\n"
                      "  asm volatile (\n"
                      "    \"{\\n\"\n"
                      "    \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
