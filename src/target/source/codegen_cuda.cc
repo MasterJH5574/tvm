@@ -89,7 +89,7 @@ std::string CodeGenCUDA::Finish() {
                      "  *ptr = make_float4(0, 0, 0, 0);\n"
                      "}\n\n";
       decl_stream << "__device__ inline void mma_ldmatrix_x1_float(half * shared_mem_ptr, "
-                     "int strides, int * fragment, int warp_index) {\n"
+                     "int strides, int fragment) {\n"
                      "  asm volatile (\n"
                      "    \"{\\n\"\n"
                      "    \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
@@ -97,12 +97,12 @@ std::string CodeGenCUDA::Finish() {
                      "cvt.u32.u64 smem_ptr, smem_ptr_long;\\n\"\n"
                      "    \"ldmatrix.sync.aligned.m8n8.x1.shared.b16 {%0}, [smem_ptr];\\n\"\n"
                      "    \"}\\n\"\n"
-                     "    : \"=r\"(fragment[warp_index])\n"
+                     "    : \"=r\"(fragment)\n"
                      "    : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides)\n"
                      "  );\n"
                      "}\n\n";
       decl_stream << "__device__ inline void mma_ldmatrix_x2_float(half * shared_mem_ptr, "
-                     "int strides, int * fragment, int warp_index) {\n"
+                     "int strides, int * fragment) {\n"
                      "  asm volatile (\n"
                      "    \"{\\n\"\n"
                      "    \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
@@ -110,8 +110,8 @@ std::string CodeGenCUDA::Finish() {
                      "cvt.u32.u64 smem_ptr, smem_ptr_long;\\n\"\n"
                      "    \"ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0, %1}, [smem_ptr];\\n\"\n"
                      "    \"}\\n\"\n"
-                     "    : \"=r\"(fragment[2 * warp_index]), "
-                     "\"=r\"(fragment[2 * warp_index + 1])\n"
+                     "    : \"=r\"(fragment[0]), "
+                     "\"=r\"(fragment[1])\n"
                      "    : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides)\n"
                      "  );\n"
                      "}\n\n";
@@ -611,9 +611,9 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->PrintExpr(op->args[7],os);
     os << ", ";
     this->PrintExpr(op->args[0],os);
-    os << ", ";
+    os << "[";
     this->PrintExpr(op->args[1],os);
-    os << ")";
+    os << "])";
   } else if(op->op.same_as(builtin::tvm_ldmatrix_x2_sync())){
     need_mma_h_ = false;
     ICHECK_EQ(op->args.size(), 8U);
@@ -622,11 +622,11 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->PrintExpr(op->args[6],os);
     os << ", ";
     this->PrintExpr(op->args[7],os);
-    os << ", (int *) ";
-    this->PrintExpr(op->args[0],os);
     os << ", ";
+    this->PrintExpr(op->args[0],os);
+    os << "[";
     this->PrintExpr(op->args[1],os);
-    os << ")";
+    os << "])";
   } else if (op->op.same_as(builtin::tvm_ptx_mma_sync())){
     need_mma_h_ = false;
     ICHECK_EQ(op->args.size(), 8U);
