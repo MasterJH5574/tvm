@@ -98,7 +98,8 @@ std::string CodeGenCUDA::Finish() {
                      "    \"ldmatrix.sync.aligned.m8n8.x1.shared.b16 {%0}, [smem_ptr];\\n\"\n"
                      "    \"}\\n\"\n"
                      "    : \"=r\"(fragment)\n"
-                     "    : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides)\n"
+                     "    : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides + threadIdx.x % 8 "
+                     "/ 2 * 8)\n"
                      "  );\n"
                      "}\n\n";
       decl_stream << "__device__ inline void mma_ldmatrix_x2_float(half * shared_mem_ptr, "
@@ -112,7 +113,8 @@ std::string CodeGenCUDA::Finish() {
                      "    \"}\\n\"\n"
                      "    : \"=r\"(fragment[0]), "
                      "\"=r\"(fragment[1])\n"
-                     "    : \"l\"(shared_mem_ptr + threadIdx.x % 16 * strides)\n"
+                     "    : \"l\"(shared_mem_ptr + threadIdx.x % 16 * strides + threadIdx.x % 16 "
+                     "/ 2 * 8)\n"
                      "  );\n"
                      "}\n\n";
       decl_stream << "__device__ inline void mma_sync_m16n8k8_161632(float * fragmentD, "
