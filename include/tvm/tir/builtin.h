@@ -566,7 +566,7 @@ TVM_DLL const Op& tvm_mma_fragment_initialize();
  *
  *  void tvm_ldmatrix_x1_sync(Var fragment, Expr index,
  *                            UIntImm mma_m, UIntImm mma_n, UIntImm mma_k,
- *                            UIntImm trans, Expr buffer_ptr, Expr stride) {
+ *                            UIntImm trans, Expr buffer_ptr, Expr stride, UIntImm swizzle) {
  *    //matrix_num=1 (no trans)
  *    asm volatile ("
  *    .reg .u32 smem_ptr; .reg .u64 smem_ptr_long;
@@ -575,6 +575,7 @@ TVM_DLL const Op& tvm_mma_fragment_initialize();
  *              : "=r"(buffer_ptr + threadIdx.x % 8 * stride)
  *              : "r"(fragment[index]));
  *  }
+ *  if swizzle is enabled, the shared memory pointer will be mapped to a new location to reduce bank conflict.
  */
 TVM_DLL const Op& tvm_ldmatrix_x1_sync();
 
@@ -583,7 +584,7 @@ TVM_DLL const Op& tvm_ldmatrix_x1_sync();
  *
  *  void tvm_ldmatrix_x2_sync(Var fragment, Expr index,
  *                            UIntImm mma_m, UIntImm mma_n, UIntImm mma_k,
- *                            UIntImm trans, Expr buffer_ptr, Expr stride) {
+ *                            UIntImm trans, Expr buffer_ptr, Expr stride, UIntImm swizzle) {
  *    asm volatile ("
  *    .reg .u32 smem_ptr; .reg .u64 smem_ptr_long;
  *    cvta.to.shared.u64 smem_ptr_long, %0; cvt.u32.u64 smem_ptr, smem_ptr_long;
@@ -591,6 +592,7 @@ TVM_DLL const Op& tvm_ldmatrix_x1_sync();
  *              : "=r"(buffer_ptr + threadIdx.x % 16 * stride)
  *              : "r"(fragment[2 * index]), "r"(fragment[2 * index + 1]));
  *  }
+ *  if swizzle is enabled, the shared memory pointer will be mapped to a new location to reduce bank conflict.
  */
 TVM_DLL const Op& tvm_ldmatrix_x2_sync();
 
@@ -600,9 +602,10 @@ TVM_DLL const Op& tvm_ldmatrix_x2_sync();
  *
  *  void tvm_stmatrix_sync(Var fragment, Expr index,
  *                         UIntImm mma_m, UIntImm mma_n, UIntImm mma_k,
- *                         Expr buffer_ptr, Expr stride) {
+ *                         Expr buffer_ptr, Expr stride, UIntImm swizzle) {
  *    store_fragment(fragment[index],buffer_ptr,stride);
  *  }
+ *    if swizzle is enabled, the shared memory pointer will be mapped to a new location to reduce bank conflict.
  */
 TVM_DLL const Op& tvm_stmatrix_sync();
 

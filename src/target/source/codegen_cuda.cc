@@ -80,17 +80,21 @@ std::string CodeGenCUDA::Finish() {
   }
   if(need_store_fragment_) {
       decl_stream << "__device__ inline void store_fragment_float(float fragmentC[4], "
-                     "float * buffer, int strides) {\n"
-                     "    buffer = buffer + threadIdx.x / 4 * strides + threadIdx.x % 4 * 2;\n"
-                     "    ((float2 *) buffer)[0] = ((float2 *) fragmentC)[0];\n"
-                     "    ((float2 *) (buffer + 16 / 2 * strides))[0] = ((float2 *) fragmentC)[1];\n"
+                     "float * buffer, int strides, bool swizzle) {\n"
+                     "  int row_gap = max(1ul, 128 / strides / sizeof(float));\n"
+                     "  int pad_size = 16 / sizeof(float);\n"
+                     "  buffer = buffer + threadIdx.x / 4 * strides + (swizzle ? (threadIdx.x / 4"
+                     " / row_gap * pad_size) : 0) + threadIdx.x % 4 * 2;\n"
+                     "  ((float2 *) buffer)[0] = ((float2 *) fragmentC)[0];\n"
+                     "  ((float2 *) (buffer + 8 * strides + (swizzle ? "
+                     "(8 / row_gap * pad_size) : 0)))[0] = ((float2 *) fragmentC)[1];\n"
                      "}\n\n";
       decl_stream << "__device__ inline void mma_accumulator_init_float(float4 * ptr) {\n"
                      "  *ptr = make_float4(0, 0, 0, 0);\n"
                      "}\n\n";
       decl_stream << "__device__ inline void mma_ldmatrix_x1_float(half * shared_mem_ptr, "
-                     "int strides, int & fragment) {\n"
-                     "  int row_gap = 128 / strides / sizeof(half);\n"
+                     "int strides, int & fragment, bool swizzle) {\n"
+                     "  int row_gap = max(1ul, 128 / strides / sizeof(half));\n"
                      "  int pad_size = 16 / sizeof(half);\n"
                      "  asm volatile (\n"
                      "    \"{\\n\"\n"
@@ -100,12 +104,13 @@ std::string CodeGenCUDA::Finish() {
                      "    \"ldmatrix.sync.aligned.m8n8.x1.shared.b16 {%0}, [smem_ptr];\\n\"\n"
                      "    \"}\\n\"\n"
                      "    : \"=r\"(fragment)\n"
-                     "    : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides + threadIdx.x % 8 / row_gap * pad_size)\n"
+                     "    : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides + (swizzle ? "
+                     "(threadIdx.x % 8 / row_gap * pad_size) : 0))\n"
                      "  );\n"
                      "}\n\n";
       decl_stream << "__device__ inline void mma_ldmatrix_x2_float(half * shared_mem_ptr, "
-                     "int strides, int * fragment) {\n"
-                     "  int row_gap = 128 / strides / sizeof(half);\n"
+                     "int strides, int * fragment, bool swizzle) {\n"
+                     "  int row_gap = max(1ul, 128 / strides / sizeof(half));\n"
                      "  int pad_size = 16 / sizeof(half);\n"
                      "  asm volatile (\n"
                      "    \"{\\n\"\n"
@@ -116,7 +121,8 @@ std::string CodeGenCUDA::Finish() {
                      "    \"}\\n\"\n"
                      "    : \"=r\"(fragment[0]), "
                      "\"=r\"(fragment[1])\n"
-                     "    : \"l\"(shared_mem_ptr + threadIdx.x % 16 * strides + threadIdx.x % 16 / row_gap * pad_size)\n"
+                     "    : \"l\"(shared_mem_ptr + threadIdx.x % 16 * strides + (swizzle ? "
+                     "(threadIdx.x % 16 / row_gap * pad_size) : 0))\n"
                      "  );\n"
                      "}\n\n";
       decl_stream << "__device__ inline void mma_sync_m16n8k8_161632(float * fragmentD, "
@@ -607,30 +613,34 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     }
   } else if(op->op.same_as(builtin::tvm_ldmatrix_x1_sync())){
     need_mma_h_ = false;
-    ICHECK_EQ(op->args.size(), 8U);
+    ICHECK_EQ(op->args.size(), 9U);
     //todo:implement trans
     os << "mma_ldmatrix_x1_float(";
-    this->PrintExpr(op->args[6],os);
+    this->PrintExpr(op->args[6], os);
     os << ", ";
-    this->PrintExpr(op->args[7],os);
+    this->PrintExpr(op->args[7], os);
     os << ", ";
-    this->PrintExpr(op->args[0],os);
+    this->PrintExpr(op->args[0], os);
     os << "[";
-    this->PrintExpr(op->args[1],os);
-    os << "])";
+    this->PrintExpr(op->args[1], os);
+    os << "],";
+    this->PrintExpr(op->args[8], os);
+    os << ")";
   } else if(op->op.same_as(builtin::tvm_ldmatrix_x2_sync())){
     need_mma_h_ = false;
-    ICHECK_EQ(op->args.size(), 8U);
+    ICHECK_EQ(op->args.size(), 9U);
     //todo:implement trans
     os << "mma_ldmatrix_x2_float(";
-    this->PrintExpr(op->args[6],os);
+    this->PrintExpr(op->args[6], os);
     os << ", ";
-    this->PrintExpr(op->args[7],os);
+    this->PrintExpr(op->args[7], os);
     os << ", ";
-    this->PrintExpr(op->args[0],os);
+    this->PrintExpr(op->args[0], os);
     os << "[";
-    this->PrintExpr(op->args[1],os);
-    os << "])";
+    this->PrintExpr(op->args[1], os);
+    os << "],";
+    this->PrintExpr(op->args[8], os);
+    os << ")";
   } else if (op->op.same_as(builtin::tvm_ptx_mma_sync())){
     need_mma_h_ = false;
     ICHECK_EQ(op->args.size(), 8U);
@@ -667,7 +677,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     }
   } else if (op->op.same_as(builtin::tvm_stmatrix_sync())){
       need_store_fragment_=true;
-      CHECK_EQ(op->args.size(), 8U);
+      CHECK_EQ(op->args.size(), 9U);
       os << "store_fragment_float(";
       this->PrintExpr(op->args[0], os);
       os << "[";
@@ -676,6 +686,8 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       this->PrintExpr(op->args[6], os);
       os << ", ";
       this->PrintExpr(op->args[7], os);
+      os << ",";
+      this->PrintExpr(op->args[8], os);
       os << ")";
   } else {
     CodeGenC::VisitExpr_(op, os);

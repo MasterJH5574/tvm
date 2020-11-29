@@ -254,9 +254,12 @@ inline PrimExpr ElemOffset(const BufferNode* n, Array<PrimExpr> index) {
           offset = MergeMulMod(&ana, offset * n->shape[i] + index[i]);
         }
         if (n->swizzle) {
-          auto row_gap = make_const(DataType::Int(32), 128) / n->shape[index.size() - 1] /
-                         make_const(DataType::Int(32), 2);
-          auto pad_size = make_const(DataType::Int(32), 16 / 2);
+          auto row_gap = max(make_const(DataType::Int(32), 128) / n->shape[index.size() - 1] /
+                                 make_const(DataType::Int(32), n->dtype.bytes()),
+                             make_const(DataType::Int(32), 1));
+
+          auto pad_size = make_const(DataType::Int(32), 16 / n->dtype.bytes());
+
           offset = MergeMulMod(&ana, offset * n->shape[index.size() - 1] +
                                          offset / row_gap * pad_size + index[index.size() - 1]);
         } else {
@@ -277,9 +280,10 @@ inline PrimExpr ElemOffset(const BufferNode* n, Array<PrimExpr> index) {
       base = MergeMulMod(&ana, base + index[i] * n->strides[i]);
     }
     if(n->swizzle) {
-      auto row_gap = make_const(DataType::Int(32), 128) / n->shape[index.size() - 1] /
-                     make_const(DataType::Int(32), 2);
-      auto pad_size = make_const(DataType::Int(32), 16 / 2);
+      auto row_gap = max(make_const(DataType::Int(32), 128) / n->shape[index.size() - 1] /
+                         make_const(DataType::Int(32), n->dtype.bytes()),
+                         make_const(DataType::Int(32), 1));
+      auto pad_size = make_const(DataType::Int(32), 16 / n->dtype.bytes());
       base = MergeMulMod(&ana, base + base / n->shape[index.size() - 1] / row_gap * pad_size);
     }
     base = MergeMulMod(&ana, base + index[index.size() - 1] * n->strides[index.size() - 1]);
