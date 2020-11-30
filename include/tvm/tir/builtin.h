@@ -566,12 +566,13 @@ TVM_DLL const Op& tvm_mma_fragment_initialize();
  *
  *  void tvm_ldmatrix_x1_sync(Var fragment, Expr index,
  *                            UIntImm mma_m, UIntImm mma_n, UIntImm mma_k,
- *                            UIntImm trans, Expr buffer_ptr, Expr stride) {
- *    //matrix_num=1 (no trans)
+ *                            UIntImm trans, Expr buffer_ptr, Expr stride, StringImm layout) {
+ *    // one matrix
+ *    // LAYOUT is the layout of input, not the layout of fragment
  *    asm volatile ("
  *    .reg .u32 smem_ptr; .reg .u64 smem_ptr_long;
  *    cvta.to.shared.u64 smem_ptr_long, %0; cvt.u32.u64 smem_ptr, smem_ptr_long;
- *    ldmatrix.sync.aligned.m8n8.x1.shared.b16 {%1}, [smem_ptr];"
+ *    ldmatrix.sync.aligned.m8n8.x1{.trans}.shared.b16 {%1}, [smem_ptr];"
  *              : "=r"(buffer_ptr + threadIdx.x % 8 * stride)
  *              : "r"(fragment[index]));
  *  }
@@ -583,11 +584,13 @@ TVM_DLL const Op& tvm_ldmatrix_x1_sync();
  *
  *  void tvm_ldmatrix_x2_sync(Var fragment, Expr index,
  *                            UIntImm mma_m, UIntImm mma_n, UIntImm mma_k,
- *                            UIntImm trans, Expr buffer_ptr, Expr stride) {
+ *                            UIntImm trans, Expr buffer_ptr, Expr stride, StringImm layout) {
+ *    // two matrices
+ *    // LAYOUT is the layout of input, not the layout of fragment
  *    asm volatile ("
  *    .reg .u32 smem_ptr; .reg .u64 smem_ptr_long;
  *    cvta.to.shared.u64 smem_ptr_long, %0; cvt.u32.u64 smem_ptr, smem_ptr_long;
- *    ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%1, %2}, [smem_ptr];"
+ *    ldmatrix.sync.aligned.m8n8.x2{.trans}.shared.b16 {%1, %2}, [smem_ptr];"
  *              : "=r"(buffer_ptr + threadIdx.x % 16 * stride)
  *              : "r"(fragment[2 * index]), "r"(fragment[2 * index + 1]));
  *  }

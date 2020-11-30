@@ -119,19 +119,22 @@ class FragmentGetter : public StmtExprVisitor {
                op->op.same_as(builtin::tvm_stmatrix_sync())) {
       if (op->op.same_as(builtin::tvm_ldmatrix_x1_sync()) ||
           op->op.same_as(builtin::tvm_ldmatrix_x2_sync())) {
-        ICHECK_EQ(op->args.size(), 8U);
+        ICHECK_EQ(op->args.size(), 9U);
       } else {
-        ICHECK_EQ(op->args.size(), 8U);
+        ICHECK_EQ(op->args.size(), 9U);
       }
 
-      const VarNode* buffer_var = op->args[0].as<VarNode>();
+      const auto* buffer_var = op->args[0].as<VarNode>();
       ICHECK(buffer_var);
-      const IntImmNode* m = op->args[2].as<IntImmNode>();
-      const IntImmNode* n = op->args[3].as<IntImmNode>();
-      const IntImmNode* k = op->args[4].as<IntImmNode>();
+      const auto* m = op->args[2].as<IntImmNode>();
+      const auto* n = op->args[3].as<IntImmNode>();
+      const auto* k = op->args[4].as<IntImmNode>();
       ICHECK(m);
       ICHECK(n);
       ICHECK(k);
+
+      const auto* _layout = op->args[8].as<StringImmNode>();
+      ICHECK_EQ(_layout->value == "row_major" || _layout->value == "col_major", true);
 
       std::string scope = scopes[buffer_var];
       std::string layout = scope == "mma.matrix_a" ? "row_major"

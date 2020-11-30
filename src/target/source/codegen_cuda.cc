@@ -89,31 +89,60 @@ std::string CodeGenCUDA::Finish() {
                      "  *ptr = make_float4(0, 0, 0, 0);\n"
                      "}\n\n";
       decl_stream << "__device__ inline void mma_ldmatrix_x1_float(half * shared_mem_ptr, "
-                     "int strides, int & fragment) {\n"
-                     "  asm volatile (\n"
-                     "    \"{\\n\"\n"
-                     "    \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
-                     "    \"cvta.to.shared.u64 smem_ptr_long, %1; "
+                     "int strides, int & fragment, bool trans) {\n"
+                     "  if (!trans) {"
+                     "    asm volatile (\n"
+                     "      \"{\\n\"\n"
+                     "      \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
+                     "      \"cvta.to.shared.u64 smem_ptr_long, %1; "
                      "cvt.u32.u64 smem_ptr, smem_ptr_long;\\n\"\n"
-                     "    \"ldmatrix.sync.aligned.m8n8.x1.shared.b16 {%0}, [smem_ptr];\\n\"\n"
-                     "    \"}\\n\"\n"
-                     "    : \"=r\"(fragment)\n"
-                     "    : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides)\n"
-                     "  );\n"
+                     "      \"ldmatrix.sync.aligned.m8n8.x1.shared.b16 {%0}, [smem_ptr];\\n\"\n"
+                     "      \"}\\n\"\n"
+                     "      : \"=r\"(fragment)\n"
+                     "      : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides)\n"
+                     "    );\n"
+                     "  } else {\n"
+                     "    asm volatile (\n"
+                     "      \"{\\n\"\n"
+                     "      \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
+                     "      \"cvta.to.shared.u64 smem_ptr_long, %1; "
+                     "cvt.u32.u64 smem_ptr, smem_ptr_long;\\n\"\n"
+                     "      \"ldmatrix.sync.aligned.m8n8.x1.trans.shared.b16 {%0}, "
+                     "[smem_ptr];\\n\"\n"
+                     "      \"}\\n\"\n"
+                     "      : \"=r\"(fragment)\n"
+                     "      : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides)\n"
+                     "    );\n"
+                     "  }\n"
                      "}\n\n";
       decl_stream << "__device__ inline void mma_ldmatrix_x2_float(half * shared_mem_ptr, "
-                     "int strides, int * fragment) {\n"
-                     "  asm volatile (\n"
-                     "    \"{\\n\"\n"
-                     "    \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
-                     "    \"cvta.to.shared.u64 smem_ptr_long, %2; "
+                     "int strides, int * fragment, bool trans) {\n"
+                     "  if (!trans) {\n"
+                     "    asm volatile (\n"
+                     "      \"{\\n\"\n"
+                     "      \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
+                     "      \"cvta.to.shared.u64 smem_ptr_long, %2; "
                      "cvt.u32.u64 smem_ptr, smem_ptr_long;\\n\"\n"
-                     "    \"ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0, %1}, [smem_ptr];\\n\"\n"
-                     "    \"}\\n\"\n"
-                     "    : \"=r\"(fragment[0]), "
+                     "      \"ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0, %1}, [smem_ptr];\\n\"\n"
+                     "      \"}\\n\"\n"
+                     "      : \"=r\"(fragment[0]), "
                      "\"=r\"(fragment[1])\n"
-                     "    : \"l\"(shared_mem_ptr + threadIdx.x % 16 * strides)\n"
-                     "  );\n"
+                     "      : \"l\"(shared_mem_ptr + threadIdx.x % 16 * strides)\n"
+                     "    );\n"
+                     "  } else {\n"
+                     "    asm volatile (\n"
+                     "      \"{\\n\"\n"
+                     "      \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
+                     "      \"cvta.to.shared.u64 smem_ptr_long, %2; "
+                     "cvt.u32.u64 smem_ptr, smem_ptr_long;\\n\"\n"
+                     "      \"ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0, %1}, "
+                     "[smem_ptr];\\n\"\n"
+                     "      \"}\\n\"\n"
+                     "      : \"=r\"(fragment[0]), "
+                     "\"=r\"(fragment[1])\n"
+                     "      : \"l\"(shared_mem_ptr + threadIdx.x % 16 * strides)\n"
+                     "    );\n"
+                     "  }\n"
                      "}\n\n";
       decl_stream << "__device__ inline void mma_sync_m16n8k8_161632(float * fragmentD, "
                      "int * fragmentA, int fragmentB, float * fragmentC) {\n"
@@ -603,8 +632,9 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     }
   } else if(op->op.same_as(builtin::tvm_ldmatrix_x1_sync())){
     need_mma_h_ = false;
-    ICHECK_EQ(op->args.size(), 8U);
-    //todo:implement trans
+    ICHECK_EQ(op->args.size(), 9U);
+    std::string layout = op->args[8].as<StringImmNode>()->value;
+
     os << "mma_ldmatrix_x1_float(";
     this->PrintExpr(op->args[6],os);
     os << ", ";
@@ -613,11 +643,17 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->PrintExpr(op->args[0],os);
     os << "[";
     this->PrintExpr(op->args[1],os);
-    os << "])";
+    os << "], ";
+    if (layout == "col_major")
+      os << "false";
+    else
+      os << "true";
+    os << ")";
   } else if(op->op.same_as(builtin::tvm_ldmatrix_x2_sync())){
     need_mma_h_ = false;
-    ICHECK_EQ(op->args.size(), 8U);
-    //todo:implement trans
+    ICHECK_EQ(op->args.size(), 9U);
+    std::string layout = op->args[8].as<StringImmNode>()->value;
+
     os << "mma_ldmatrix_x2_float(";
     this->PrintExpr(op->args[6],os);
     os << ", ";
@@ -626,7 +662,12 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     this->PrintExpr(op->args[0],os);
     os << "[";
     this->PrintExpr(op->args[1],os);
-    os << "])";
+    os << "], ";
+    if (layout == "row_major")
+      os << "false";
+    else
+      os << "true";
+    os << ")";
   } else if (op->op.same_as(builtin::tvm_ptx_mma_sync())){
     need_mma_h_ = false;
     ICHECK_EQ(op->args.size(), 8U);
