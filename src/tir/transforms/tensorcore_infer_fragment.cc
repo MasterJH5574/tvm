@@ -133,8 +133,11 @@ class FragmentGetter : public StmtExprVisitor {
       ICHECK(n);
       ICHECK(k);
 
-      const auto* _layout = op->args[8].as<StringImmNode>();
-      ICHECK_EQ(_layout->value == "row_major" || _layout->value == "col_major", true);
+      if (!op->op.same_as(builtin::tvm_stmatrix_sync())) {
+        const auto* _layout = op->args[8].as<StringImmNode>();
+        ICHECK(_layout);
+        ICHECK_EQ(_layout->value == "row_major" || _layout->value == "col_major", true);
+      }
 
       std::string scope = scopes[buffer_var];
       std::string layout = scope == "mma.matrix_a" ? "row_major"
