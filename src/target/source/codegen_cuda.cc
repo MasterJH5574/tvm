@@ -79,53 +79,80 @@ std::string CodeGenCUDA::Finish() {
     decl_stream << "#include <mma.h>\n";
   }
   if(need_store_fragment_) {
-      decl_stream << "__device__ inline void store_fragment_float(float fragmentC[4], "
-                     "float * buffer, int strides) {\n"
-                     "    buffer = buffer + threadIdx.x / 4 * strides + threadIdx.x % 4 * 2;\n"
-                     "    ((float2 *) buffer)[0] = ((float2 *) fragmentC)[0];\n"
-                     "    ((float2 *) (buffer + 16 / 2 * strides))[0] = ((float2 *) fragmentC)[1];\n"
-                     "}\n\n";
-      decl_stream << "__device__ inline void mma_accumulator_init_float(float4 * ptr) {\n"
-                     "  *ptr = make_float4(0, 0, 0, 0);\n"
-                     "}\n\n";
-      decl_stream << "__device__ inline void mma_ldmatrix_x1_float(half * shared_mem_ptr, "
-                     "int strides, int & fragment) {\n"
-                     "  asm volatile (\n"
-                     "    \"{\\n\"\n"
-                     "    \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
-                     "    \"cvta.to.shared.u64 smem_ptr_long, %1; "
-                     "cvt.u32.u64 smem_ptr, smem_ptr_long;\\n\"\n"
-                     "    \"ldmatrix.sync.aligned.m8n8.x1.shared.b16 {%0}, [smem_ptr];\\n\"\n"
-                     "    \"}\\n\"\n"
-                     "    : \"=r\"(fragment)\n"
-                     "    : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides)\n"
-                     "  );\n"
-                     "}\n\n";
-      decl_stream << "__device__ inline void mma_ldmatrix_x2_float(half * shared_mem_ptr, "
-                     "int strides, int * fragment) {\n"
-                     "  asm volatile (\n"
-                     "    \"{\\n\"\n"
-                     "    \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
-                     "    \"cvta.to.shared.u64 smem_ptr_long, %2; "
-                     "cvt.u32.u64 smem_ptr, smem_ptr_long;\\n\"\n"
-                     "    \"ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0, %1}, [smem_ptr];\\n\"\n"
-                     "    \"}\\n\"\n"
-                     "    : \"=r\"(fragment[0]), "
-                     "\"=r\"(fragment[1])\n"
-                     "    : \"l\"(shared_mem_ptr + threadIdx.x % 16 * strides)\n"
-                     "  );\n"
-                     "}\n\n";
-      decl_stream << "__device__ inline void mma_sync_m16n8k8_161632(float * fragmentD, "
-                     "int * fragmentA, int fragmentB, float * fragmentC) {\n"
-                     "  asm volatile(\"mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 "
-                     "{%0, %1, %2, %3}, {%4, %5}, {%6}, {%7, %8, %9, %10};\\n\"\n"
-                     "    : \"=f\"(fragmentD[0]), \"=f\"(fragmentD[1]), "
-                     "\"=f\"(fragmentD[2]), \"=f\"(fragmentD[3])\n"
-                     "    : \"r\"(fragmentA[0]), \"r\"(fragmentA[1]), \"r\"(fragmentB),\n"
-                     "      \"f\"(fragmentC[0]), \"f\"(fragmentC[1]), "
-                     "\"f\"(fragmentC[2]), \"f\"(fragmentC[3])\n"
-                     "  );\n"
-                     "}\n\n";
+    decl_stream << "__device__ inline void store_fragment_float(float fragmentC[4], "
+                   "float * buffer, int strides) {\n"
+                   "    buffer = buffer + threadIdx.x / 4 * strides + threadIdx.x % 4 * 2;\n"
+                   "    ((float2 *) buffer)[0] = ((float2 *) fragmentC)[0];\n"
+                   "    ((float2 *) (buffer + 16 / 2 * strides))[0] = ((float2 *) fragmentC)[1];\n"
+                   "}\n\n";
+    decl_stream << "__device__ inline void mma_accumulator_init_float(float4 * ptr) {\n"
+                   "  *ptr = make_float4(0, 0, 0, 0);\n"
+                   "}\n\n";
+    decl_stream << "__device__ inline void mma_ldmatrix_x1_float(half * shared_mem_ptr, "
+                   "int strides, int & fragment) {\n"
+                   "  asm volatile (\n"
+                   "    \"{\\n\"\n"
+                   "    \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
+                   "    \"cvta.to.shared.u64 smem_ptr_long, %1; "
+                   "cvt.u32.u64 smem_ptr, smem_ptr_long;\\n\"\n"
+                   "    \"ldmatrix.sync.aligned.m8n8.x1.shared.b16 {%0}, [smem_ptr];\\n\"\n"
+                   "    \"}\\n\"\n"
+                   "    : \"=r\"(fragment)\n"
+                   "    : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides)\n"
+                   "  );\n"
+                   "}\n\n";
+    decl_stream << "__device__ inline void mma_ldmatrix_x1_trans_float(half * shared_mem_ptr, "
+                   "int strides, int & fragment) {\n"
+                   "  asm volatile (\n"
+                   "    \"{\\n\"\n"
+                   "    \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
+                   "    \"cvta.to.shared.u64 smem_ptr_long, %1; "
+                   "cvt.u32.u64 smem_ptr, smem_ptr_long;\\n\"\n"
+                   "    \"ldmatrix.sync.aligned.m8n8.x1.trans.shared.b16 {%0}, [smem_ptr];\\n\"\n"
+                   "    \"}\\n\"\n"
+                   "    : \"=r\"(fragment)\n"
+                   "    : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides)\n"
+                   "  );\n"
+                   "}\n\n";
+    decl_stream << "__device__ inline void mma_ldmatrix_x2_float(half * shared_mem_ptr, "
+                   "int strides, int * fragment) {\n"
+                   "  asm volatile (\n"
+                   "    \"{\\n\"\n"
+                   "    \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
+                   "    \"cvta.to.shared.u64 smem_ptr_long, %2; "
+                   "cvt.u32.u64 smem_ptr, smem_ptr_long;\\n\"\n"
+                   "    \"ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0, %1}, [smem_ptr];\\n\"\n"
+                   "    \"}\\n\"\n"
+                   "    : \"=r\"(fragment[0]), "
+                   "\"=r\"(fragment[1])\n"
+                   "    : \"l\"(shared_mem_ptr + threadIdx.x % 16 * strides)\n"
+                   "  );\n"
+                   "}\n\n";
+    decl_stream << "__device__ inline void mma_ldmatrix_x2_trans_float(half * shared_mem_ptr, "
+                   "int strides, int * fragment) {\n"
+                   "  asm volatile (\n"
+                   "    \"{\\n\"\n"
+                   "    \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
+                   "    \"cvta.to.shared.u64 smem_ptr_long, %2; "
+                   "cvt.u32.u64 smem_ptr, smem_ptr_long;\\n\"\n"
+                   "    \"ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0, %1}, [smem_ptr];\\n\"\n"
+                   "    \"}\\n\"\n"
+                   "    : \"=r\"(fragment[0]), "
+                   "\"=r\"(fragment[1])\n"
+                   "    : \"l\"(shared_mem_ptr + threadIdx.x % 16 * strides)\n"
+                   "  );\n"
+                   "}\n\n";
+    decl_stream << "__device__ inline void mma_sync_m16n8k8_161632(float * fragmentD, "
+                   "int * fragmentA, int fragmentB, float * fragmentC) {\n"
+                   "  asm volatile(\"mma.sync.aligned.m16n8k8.row.col.f32.f16.f16.f32 "
+                   "{%0, %1, %2, %3}, {%4, %5}, {%6}, {%7, %8, %9, %10};\\n\"\n"
+                   "    : \"=f\"(fragmentD[0]), \"=f\"(fragmentD[1]), "
+                   "\"=f\"(fragmentD[2]), \"=f\"(fragmentD[3])\n"
+                   "    : \"r\"(fragmentA[0]), \"r\"(fragmentA[1]), \"r\"(fragmentB),\n"
+                   "      \"f\"(fragmentC[0]), \"f\"(fragmentC[1]), "
+                   "\"f\"(fragmentC[2]), \"f\"(fragmentC[3])\n"
+                   "  );\n"
+                   "}\n\n";
   }
   return CodeGenC::Finish();
 }
@@ -606,29 +633,53 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     ICHECK_EQ(op->args.size(), 9U);
     std::string layout = op->args[8].as<StringImmNode>()->value;
 
-    os << "mma_ldmatrix_x1_float(";
-    this->PrintExpr(op->args[6],os);
-    os << ", ";
-    this->PrintExpr(op->args[7],os);
-    os << ", ";
-    this->PrintExpr(op->args[0],os);
-    os << "[";
-    this->PrintExpr(op->args[1],os);
-    os << "])";
+    if (layout == "col_major") {
+      os << "mma_ldmatrix_x1_float(";
+      this->PrintExpr(op->args[6], os);
+      os << ", ";
+      this->PrintExpr(op->args[7], os);
+      os << ", ";
+      this->PrintExpr(op->args[0], os);
+      os << "[";
+      this->PrintExpr(op->args[1], os);
+      os << "])";
+    } else {
+      os << "mma_ldmatrix_x1_trans_float(";
+      this->PrintExpr(op->args[6], os);
+      os << ", ";
+      this->PrintExpr(op->args[7], os);
+      os << ", ";
+      this->PrintExpr(op->args[0], os);
+      os << "[";
+      this->PrintExpr(op->args[1], os);
+      os << "])";
+    }
   } else if(op->op.same_as(builtin::tvm_ldmatrix_x2_sync())){
     need_mma_h_ = false;
     ICHECK_EQ(op->args.size(), 9U);
     std::string layout = op->args[8].as<StringImmNode>()->value;
 
-    os << "mma_ldmatrix_x2_float(";
-    this->PrintExpr(op->args[6],os);
-    os << ", ";
-    this->PrintExpr(op->args[7],os);
-    os << ", ";
-    this->PrintExpr(op->args[0],os);
-    os << "[";
-    this->PrintExpr(op->args[1],os);
-    os << "])";
+    if (layout == "row_major") {
+      os << "mma_ldmatrix_x2_float(";
+      this->PrintExpr(op->args[6], os);
+      os << ", ";
+      this->PrintExpr(op->args[7], os);
+      os << ", ";
+      this->PrintExpr(op->args[0], os);
+      os << "[";
+      this->PrintExpr(op->args[1], os);
+      os << "])";
+    } else {
+      os << "mma_ldmatrix_x2_trans_float(";
+      this->PrintExpr(op->args[6], os);
+      os << ", ";
+      this->PrintExpr(op->args[7], os);
+      os << ", ";
+      this->PrintExpr(op->args[0], os);
+      os << "[";
+      this->PrintExpr(op->args[1], os);
+      os << "])";
+    }
   } else if (op->op.same_as(builtin::tvm_ptx_mma_sync())){
     need_mma_h_ = false;
     ICHECK_EQ(op->args.size(), 8U);
