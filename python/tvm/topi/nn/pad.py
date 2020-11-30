@@ -55,7 +55,7 @@ def pad(data, pad_before, pad_after=None, pad_value=0.0, name="PadInput"):
             "Input dimension and pad_before dismatch : %d vs %d" % (n, len(pad_before))
         )
     if len(pad_after) != n:
-        raise ValueError("Input dimension and pad_after dismatch : %d vs %d" % (n, len(pad_before)))
+        raise ValueError("Input dimension and pad_after dismatch : %d vs %d" % (n, len(pad_after)))
     ana = tvm.arith.Analyzer()
     dshape = []
     for dim in data.shape:
