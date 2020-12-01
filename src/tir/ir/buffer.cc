@@ -280,11 +280,11 @@ inline PrimExpr ElemOffset(const BufferNode* n, Array<PrimExpr> index) {
       base = MergeMulMod(&ana, base + index[i] * n->strides[i]);
     }
     if(n->swizzle) {
-      auto row_gap = max(make_const(DataType::Int(32), 128) / n->shape[index.size() - 1] /
+      auto row_gap = max(make_const(DataType::Int(32), 128) / n->strides[index.size() - 2] /
                          make_const(DataType::Int(32), n->dtype.bytes()),
                          make_const(DataType::Int(32), 1));
       auto pad_size = make_const(DataType::Int(32), 16 / n->dtype.bytes());
-      base = MergeMulMod(&ana, base + base / n->shape[index.size() - 1] / row_gap * pad_size);
+      base = MergeMulMod(&ana, base + base / n->strides[index.size() - 2] / row_gap * pad_size);
     }
     base = MergeMulMod(&ana, base + index[index.size() - 1] * n->strides[index.size() - 1]);
   }
