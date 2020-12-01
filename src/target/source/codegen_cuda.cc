@@ -110,6 +110,8 @@ std::string CodeGenCUDA::Finish() {
                    "}\n\n";
     decl_stream << "__device__ inline void mma_ldmatrix_x1_trans_float(half * shared_mem_ptr, "
                    "int strides, int & fragment) {\n"
+                   "  int row_gap = max(1ul, 128 / strides / sizeof(half));\n"
+                   "  int pad_size = 16 / sizeof(half);\n"
                    "  asm volatile (\n"
                    "    \"{\\n\"\n"
                    "    \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
@@ -118,7 +120,8 @@ std::string CodeGenCUDA::Finish() {
                    "    \"ldmatrix.sync.aligned.m8n8.x1.trans.shared.b16 {%0}, [smem_ptr];\\n\"\n"
                    "    \"}\\n\"\n"
                    "    : \"=r\"(fragment)\n"
-                   "    : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides)\n"
+                   "    : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides + (swizzle ? "
+                   "(threadIdx.x % 8 / row_gap * pad_size) : 0))\n"
                    "  );\n"
                    "}\n\n";
     decl_stream << "__device__ inline void mma_ldmatrix_x2_float(half * shared_mem_ptr, "
@@ -132,14 +135,15 @@ std::string CodeGenCUDA::Finish() {
                    "cvt.u32.u64 smem_ptr, smem_ptr_long;\\n\"\n"
                    "    \"ldmatrix.sync.aligned.m8n8.x2.shared.b16 {%0, %1}, [smem_ptr];\\n\"\n"
                    "    \"}\\n\"\n"
-                   "    : \"=r\"(fragment[0]), "
-                   "\"=r\"(fragment[1])\n"
+                   "    : \"=r\"(fragment[0]), \"=r\"(fragment[1])\n"
                    "    : \"l\"(shared_mem_ptr + threadIdx.x % 16 * strides + (swizzle ? "
                    "(threadIdx.x % 16 / row_gap * pad_size) : 0))\n"
                    "  );\n"
                    "}\n\n";
     decl_stream << "__device__ inline void mma_ldmatrix_x2_trans_float(half * shared_mem_ptr, "
                    "int strides, int * fragment) {\n"
+                   "  int row_gap = max(1ul, 128 / strides / sizeof(half));\n"
+                   "  int pad_size = 16 / sizeof(half);\n"
                    "  asm volatile (\n"
                    "    \"{\\n\"\n"
                    "    \".reg .u32 smem_ptr; .reg .u64 smem_ptr_long;\\n\"\n"
@@ -147,9 +151,9 @@ std::string CodeGenCUDA::Finish() {
                    "cvt.u32.u64 smem_ptr, smem_ptr_long;\\n\"\n"
                    "    \"ldmatrix.sync.aligned.m8n8.x2.trans.shared.b16 {%0, %1}, [smem_ptr];\\n\"\n"
                    "    \"}\\n\"\n"
-                   "    : \"=r\"(fragment[0]), "
-                   "\"=r\"(fragment[1])\n"
-                   "    : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides + threadIdx.x / 8 * 8)\n"
+                   "    : \"=r\"(fragment[0]), \"=r\"(fragment[1])\n"
+                   "    : \"l\"(shared_mem_ptr + threadIdx.x % 8 * strides + threadIdx.x / 8 * 8"
+                   " + (swizzle ? (threadIdx.x % 8 / row_gap * pad_size) : 0))\n"
                    "  );\n"
                    "}\n\n";
     decl_stream << "__device__ inline void mma_sync_m16n8k8_161632(float * fragmentD, "
@@ -664,7 +668,9 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       this->PrintExpr(op->args[0], os);
       os << "[";
       this->PrintExpr(op->args[1], os);
-      os << "])";
+      os << "], ";
+      this->PrintExpr(op->args[9], os);
+      os << ")";
     }
   } else if(op->op.same_as(builtin::tvm_ldmatrix_x2_sync())){
     need_mma_h_ = false;
@@ -692,7 +698,9 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       this->PrintExpr(op->args[0], os);
       os << "[";
       this->PrintExpr(op->args[1], os);
-      os << "])";
+      os << "], ";
+      this->PrintExpr(op->args[9], os);
+      os << ")";
     }
   } else if (op->op.same_as(builtin::tvm_ptx_mma_sync())){
     need_mma_h_ = false;
@@ -729,19 +737,19 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       os << "]))";
     }
   } else if (op->op.same_as(builtin::tvm_stmatrix_sync())){
-      need_store_fragment_=true;
-      CHECK_EQ(op->args.size(), 9U);
-      os << "store_fragment_float(";
-      this->PrintExpr(op->args[0], os);
-      os << "[";
-      this->PrintExpr(op->args[1], os);
-      os << "], ";
-      this->PrintExpr(op->args[6], os);
-      os << ", ";
-      this->PrintExpr(op->args[7], os);
-      os << ", ";
-      this->PrintExpr(op->args[8], os);
-      os << ")";
+    need_store_fragment_=true;
+    CHECK_EQ(op->args.size(), 9U);
+    os << "store_fragment_float(";
+    this->PrintExpr(op->args[0], os);
+    os << "[";
+    this->PrintExpr(op->args[1], os);
+    os << "], ";
+    this->PrintExpr(op->args[6], os);
+    os << ", ";
+    this->PrintExpr(op->args[7], os);
+    os << ", ";
+    this->PrintExpr(op->args[8], os);
+    os << ")";
   } else {
     CodeGenC::VisitExpr_(op, os);
   }

@@ -119,7 +119,7 @@ class FragmentGetter : public StmtExprVisitor {
                op->op.same_as(builtin::tvm_stmatrix_sync())) {
       if (op->op.same_as(builtin::tvm_ldmatrix_x1_sync()) ||
           op->op.same_as(builtin::tvm_ldmatrix_x2_sync())) {
-        ICHECK_EQ(op->args.size(), 9U);
+        ICHECK_EQ(op->args.size(), 10U);
       } else {
         ICHECK_EQ(op->args.size(), 9U);
       }
