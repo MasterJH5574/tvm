@@ -648,7 +648,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string layout = op->args[8].as<StringImmNode>()->value;
 
     if (layout == "col_major") {
-      os << "mma_ldmatrix_x1_float(";
+      os << "mma_ldmatrix_x1_half(";
       this->PrintExpr(op->args[6], os);
       os << ", ";
       this->PrintExpr(op->args[7], os);
@@ -660,7 +660,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       this->PrintExpr(op->args[9], os);
       os << ")";
     } else {
-      os << "mma_ldmatrix_x1_trans_float(";
+      os << "mma_ldmatrix_x1_trans_half(";
       this->PrintExpr(op->args[6], os);
       os << ", ";
       this->PrintExpr(op->args[7], os);
@@ -678,7 +678,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
     std::string layout = op->args[8].as<StringImmNode>()->value;
 
     if (layout == "row_major") {
-      os << "mma_ldmatrix_x2_float(";
+      os << "mma_ldmatrix_x2_half(";
       this->PrintExpr(op->args[6], os);
       os << ", ";
       this->PrintExpr(op->args[7], os);
@@ -690,7 +690,7 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
       this->PrintExpr(op->args[9], os);
       os << ")";
     } else {
-      os << "mma_ldmatrix_x2_trans_float(";
+      os << "mma_ldmatrix_x2_trans_half(";
       this->PrintExpr(op->args[6], os);
       os << ", ";
       this->PrintExpr(op->args[7], os);
