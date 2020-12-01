@@ -80,7 +80,7 @@ std::string CodeGenCUDA::Finish() {
   }
   if(need_store_fragment_) {
     decl_stream << "__device__ inline void store_fragment_float(float fragmentC[4], "
-                   "float * buffer, int strides) {\n"
+                   "float * buffer, int strides, bool swizzle) {\n"
                    "  int row_gap = max(1ul, 128 / strides / sizeof(float));\n"
                    "  int pad_size = 16 / sizeof(float);\n"
                    "  buffer = buffer + threadIdx.x / 4 * strides + (swizzle ? (threadIdx.x / 4"
@@ -109,7 +109,7 @@ std::string CodeGenCUDA::Finish() {
                    "  );\n"
                    "}\n\n";
     decl_stream << "__device__ inline void mma_ldmatrix_x1_trans_half(half * shared_mem_ptr, "
-                   "int strides, int & fragment) {\n"
+                   "int strides, int & fragment, bool swizzle) {\n"
                    "  int row_gap = max(1ul, 128 / strides / sizeof(half));\n"
                    "  int pad_size = 16 / sizeof(half);\n"
                    "  asm volatile (\n"
@@ -141,7 +141,7 @@ std::string CodeGenCUDA::Finish() {
                    "  );\n"
                    "}\n\n";
     decl_stream << "__device__ inline void mma_ldmatrix_x2_trans_half(half * shared_mem_ptr, "
-                   "int strides, int * fragment) {\n"
+                   "int strides, int * fragment, bool swizzle) {\n"
                    "  int row_gap = max(1ul, 128 / strides / sizeof(half));\n"
                    "  int pad_size = 16 / sizeof(half);\n"
                    "  asm volatile (\n"
