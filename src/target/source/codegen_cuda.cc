@@ -92,7 +92,7 @@ std::string CodeGenCUDA::Finish() {
     decl_stream << "__device__ inline void mma_accumulator_init_float(float4 * ptr) {\n"
                    "  *ptr = make_float4(0, 0, 0, 0);\n"
                    "}\n\n";
-    decl_stream << "__device__ inline void mma_ldmatrix_x1_float(half * shared_mem_ptr, "
+    decl_stream << "__device__ inline void mma_ldmatrix_x1_half(half * shared_mem_ptr, "
                    "int strides, int & fragment, bool swizzle) {\n"
                    "  int row_gap = max(1ul, 128 / strides / sizeof(half));\n"
                    "  int pad_size = 16 / sizeof(half);\n"
@@ -108,7 +108,7 @@ std::string CodeGenCUDA::Finish() {
                    "(threadIdx.x % 8 / row_gap * pad_size) : 0))\n"
                    "  );\n"
                    "}\n\n";
-    decl_stream << "__device__ inline void mma_ldmatrix_x1_trans_float(half * shared_mem_ptr, "
+    decl_stream << "__device__ inline void mma_ldmatrix_x1_trans_half(half * shared_mem_ptr, "
                    "int strides, int & fragment) {\n"
                    "  int row_gap = max(1ul, 128 / strides / sizeof(half));\n"
                    "  int pad_size = 16 / sizeof(half);\n"
@@ -124,7 +124,7 @@ std::string CodeGenCUDA::Finish() {
                    "(threadIdx.x % 8 / row_gap * pad_size) : 0))\n"
                    "  );\n"
                    "}\n\n";
-    decl_stream << "__device__ inline void mma_ldmatrix_x2_float(half * shared_mem_ptr, "
+    decl_stream << "__device__ inline void mma_ldmatrix_x2_half(half * shared_mem_ptr, "
                    "int strides, int * fragment, bool swizzle) {\n"
                    "  int row_gap = max(1ul, 128 / strides / sizeof(half));\n"
                    "  int pad_size = 16 / sizeof(half);\n"
@@ -140,7 +140,7 @@ std::string CodeGenCUDA::Finish() {
                    "(threadIdx.x % 16 / row_gap * pad_size) : 0))\n"
                    "  );\n"
                    "}\n\n";
-    decl_stream << "__device__ inline void mma_ldmatrix_x2_trans_float(half * shared_mem_ptr, "
+    decl_stream << "__device__ inline void mma_ldmatrix_x2_trans_half(half * shared_mem_ptr, "
                    "int strides, int * fragment) {\n"
                    "  int row_gap = max(1ul, 128 / strides / sizeof(half));\n"
                    "  int pad_size = 16 / sizeof(half);\n"
