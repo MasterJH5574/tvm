@@ -215,19 +215,25 @@ class StorageFlattener : public StmtExprMutator {
           int first_dim = 0;
           int last_dim = strides.size() - 1;
           allocate_size = strides[first_dim] * shape[first_dim];
+          auto row_gap = max(make_const(DataType::Int(32), 128) / strides[strides.size() - 2] /
+                             make_const(DataType::Int(32), op->buffer->dtype.bytes()),
+                             make_const(DataType::Int(32), 1));
+          auto pad_size = make_const(DataType::Int(32), 16 / op->buffer->dtype.bytes());
+  
           allocate_size = allocate_size + allocate_size / strides[last_dim - 1] /
-                                              make_const(DataType::Int(32), 2) *
-                                              make_const(DataType::Int(32), 8);
+                                              row_gap * pad_size;
         } else {
           int last_dim = shape.size() - 1;
           allocate_size = make_const(DataType::Int(32), 1);
           for (size_t i = 0; i < shape.size() - 1; i++) {
             allocate_size = allocate_size * shape[i];
           }
-  
+          auto row_gap = max(make_const(DataType::Int(32), 128) / shape[shape.size() - 1] /
+                             make_const(DataType::Int(32), op->buffer->dtype.bytes()),
+                             make_const(DataType::Int(32), 1));
+          auto pad_size = make_const(DataType::Int(32), 16 / op->buffer->dtype.bytes());
           allocate_size =
-              allocate_size * shape[last_dim] +
-              allocate_size / make_const(DataType::Int(32), 2) * make_const(DataType::Int(32), 8);
+              allocate_size * shape[last_dim] + allocate_size / row_gap * pad_size;
         }
       }
   

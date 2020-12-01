@@ -121,7 +121,7 @@ class FragmentGetter : public StmtExprVisitor {
           op->op.same_as(builtin::tvm_ldmatrix_x2_sync())) {
         ICHECK_EQ(op->args.size(), 9U);
       } else {
-        ICHECK_EQ(op->args.size(), 8U);
+        ICHECK_EQ(op->args.size(), 9U);
       }
 
       const auto* buffer_var = op->args[0].as<VarNode>();

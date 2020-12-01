@@ -566,9 +566,12 @@ TVM_DLL const Op& tvm_mma_fragment_initialize();
  *
  *  void tvm_ldmatrix_x1_sync(Var fragment, Expr index,
  *                            UIntImm mma_m, UIntImm mma_n, UIntImm mma_k,
- *                            UIntImm trans, Expr buffer_ptr, Expr stride, StringImm layout) {
+ *                            UIntImm trans, Expr buffer_ptr, Expr stride,
+ *                            StringImm layout, UIntImm swizzle) {
  *    // one matrix
  *    // LAYOUT is the layout of input, not the layout of fragment
+ *    // if swizzle is enabled, the shared memory pointer will be mapped to
+ *    // a new location to reduce bank conflict.
  *    asm volatile ("
  *    .reg .u32 smem_ptr; .reg .u64 smem_ptr_long;
  *    cvta.to.shared.u64 smem_ptr_long, %0; cvt.u32.u64 smem_ptr, smem_ptr_long;
@@ -584,9 +587,12 @@ TVM_DLL const Op& tvm_ldmatrix_x1_sync();
  *
  *  void tvm_ldmatrix_x2_sync(Var fragment, Expr index,
  *                            UIntImm mma_m, UIntImm mma_n, UIntImm mma_k,
- *                            UIntImm trans, Expr buffer_ptr, Expr stride, StringImm layout) {
+ *                            UIntImm trans, Expr buffer_ptr, Expr stride,
+ *                            StringImm layout, UintImm swizzle) {
  *    // two matrices
  *    // LAYOUT is the layout of input, not the layout of fragment
+ *    // if swizzle is enabled, the shared memory pointer will be mapped to
+ *    // a new location to reduce bank conflict.
  *    asm volatile ("
  *    .reg .u32 smem_ptr; .reg .u64 smem_ptr_long;
  *    cvta.to.shared.u64 smem_ptr_long, %0; cvt.u32.u64 smem_ptr, smem_ptr_long;
@@ -603,7 +609,9 @@ TVM_DLL const Op& tvm_ldmatrix_x2_sync();
  *
  *  void tvm_stmatrix_sync(Var fragment, Expr index,
  *                         UIntImm mma_m, UIntImm mma_n, UIntImm mma_k,
- *                         Expr buffer_ptr, Expr stride) {
+ *                         Expr buffer_ptr, Expr stride, UIntImm swizzle) {
+ *    // if swizzle is enabled, the shared memory pointer will be mapped to
+ *    // a new location to reduce bank conflict.
  *    store_fragment(fragment[index],buffer_ptr,stride);
  *  }
  */
