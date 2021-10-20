@@ -63,6 +63,15 @@ SparseVariableAxis::SparseVariableAxis(String name, PrimExpr length, Buffer indp
   data_ = std::move(node);
 }
 
+SparseBuffer::SparseBuffer(AxisTree root, Array<Axis> axes, int ndim, Buffer data) {
+  ObjectPtr<SparseBufferNode> node = make_object<SparseBufferNode>();
+  node->root = std::move(root);
+  node->axes = std::move(axes);
+  node->ndim = ndim;
+  node->data = std::move(data);
+  data_ = std::move(node);
+}
+
 // TODO(zihao/ruihang)
 }  // namespace sparse
 

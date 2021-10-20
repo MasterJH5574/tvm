@@ -303,6 +303,26 @@ class SparseBufferNode : public Object {
   int ndim;
   /* Buffer corresponding to flattened value */
   Buffer data;
+
+  void VisitAttrs(AttrVisitor* v) {
+    v->Visit("name", &root);
+    v->Visit("length", &axes);
+    v->Visit("indptr", &ndim);
+    v->Visit("num_cols", &data);
+  }
+
+  bool SEqualReduce(const SparseBufferNode* other, SEqualReducer equal) const {
+    return equal(root, other->root) && equal(axes, other->axes) && equal(ndim, other->ndim) &&
+           equal(data, other->data);
+  }
+
+  void SHashReduce(SHashReducer hash_reduce) const {
+    hash_reduce(root);
+    hash_reduce(axes);
+    hash_reduce(ndim);
+    hash_reduce(data);
+  }
+
   static constexpr const char* _type_key = "tir.sparse.SparseBufferNode";
   TVM_DECLARE_FINAL_OBJECT_INFO(SparseBufferNode, Object);
 };
@@ -313,6 +333,8 @@ class SparseBufferNode : public Object {
  */
 class SparseBuffer : public ObjectRef {
  public:
+  TVM_DLL explicit SparseBuffer(AxisTree root, Array<Axis> axes, int ndim, Buffer data);
+
   TVM_DEFINE_OBJECT_REF_METHODS(SparseBuffer, ObjectRef, SparseBufferNode);
 };
 
