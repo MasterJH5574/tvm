@@ -342,4 +342,4 @@ class SparseBuffer : public ObjectRef {
 }  // namespace tir
 }  // namespace tvm
 
-#endif  // TVM_TIR_BUFFER_H_
+#endif  // TVM_TIR_SPARSE_H_
