@@ -698,6 +698,39 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
       p->stream << '\n';
     });
 
+// SparseBufferStore
+SparseBufferStore::SparseBufferStore(SparseBuffer buffer, PrimExpr value, Array<PrimExpr> indices,
+                                     Span span) {
+  ObjectPtr<SparseBufferStoreNode> node = make_object<SparseBufferStoreNode>();
+  node->buffer = std::move(buffer);
+  node->value = std::move(value);
+  node->indices = std::move(indices);
+  node->span = std::move(span);
+  data_ = std::move(node);
+}
+
+TVM_REGISTER_GLOBAL("tir.SparseBufferStore")
+    .set_body_typed([](SparseBuffer buffer, PrimExpr value, Array<PrimExpr> indices, Span span) {
+      return SparseBufferStore(buffer, value, indices, span);
+    });
+
+TVM_REGISTER_NODE_TYPE(SparseBufferStoreNode);
+
+TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
+    .set_dispatch<SparseBufferStoreNode>([](const ObjectRef& node, ReprPrinter* p) {
+      auto* op = static_cast<const SparseBufferStoreNode*>(node.get());
+      p->PrintIndent();
+      p->stream << op->buffer->name << "[";
+      for (size_t i = 0; i < op->indices.size(); ++i) {
+        p->Print(op->indices[i]);
+        if (i < op->indices.size() - 1) p->stream << ", ";
+      }
+      p->stream << "]";
+      p->stream << " = ";
+      p->Print(op->value);
+      p->stream << '\n';
+    });
+
 // BufferRealize
 BufferRealize::BufferRealize(Buffer buffer, Array<Range> bounds, PrimExpr condition, Stmt body,
                              Span span) {
@@ -923,17 +956,21 @@ void PrintBlockSignature(const BlockNode* op, ReprPrinter* p) {
   }
 }
 
-void PrintBlockBody(const BlockNode* op, ReprPrinter* p) {
-  // Print init
-  if (op->init.defined()) {
+void PrintInitStmt(const Optional<Stmt>& init, ReprPrinter* p) {
+  if (init.defined()) {
     p->PrintIndent();
     p->stream << "with init() {\n";
     p->indent += 2;
-    p->Print(op->init.value());
+    p->Print(init.value());
     p->indent -= 2;
     p->PrintIndent();
     p->stream << "}\n";
   }
+}
+
+void PrintBlockBody(const BlockNode* op, ReprPrinter* p) {
+  // Print init
+  PrintInitStmt(op->init, p);
   // Print body
   p->Print(op->body);
 }
@@ -1005,6 +1042,92 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
       PrintBlockSignature(block_op, p);
       // Print block init and body
       PrintBlockBody(block_op, p);
+
+      p->indent -= 2;
+      p->PrintIndent();
+      p->stream << "}\n";
+    });
+
+SparseBlock::SparseBlock(Array<SpIterVar> sp_iter_vars, Array<ObjectRef> sp_structs,
+                         Array<Array<Var>> sp_struct_params, String name, Stmt body,
+                         Optional<Stmt> init, Span span) {
+  CHECK_EQ(sp_structs.size(), sp_struct_params.size())
+      << "ValueError: The length of `sp_struct_params` is expected to be equal to the length "
+         "`sp_structs`, which is the number of sparse data structures";
+  Map<ObjectRef, Array<Var>> sp_struct_param_map;
+  for (int i = 0; i < static_cast<int>(sp_structs.size()); ++i) {
+    ObjectRef obj = sp_structs[i];
+    Array<Var> params = sp_struct_params[i];
+
+    if (obj->IsInstance<DenseFixedAxisNode>()) {
+      CHECK(params.size() == 0)
+          << "ValueError: The number of function parameters for dense-fixed axes should be 0";
+    } else if (obj->IsInstance<DenseVariableAxisNode>()) {
+      CHECK(params.size() == 1)
+          << "ValueError: The number of function parameters for dense-variable axes should be 1";
+    } else if (obj->IsInstance<SparseFixedAxisNode>()) {
+      CHECK(params.size() == 1)
+          << "ValueError: The number of function parameters for sparse-fixed axes should be 1";
+    } else if (obj->IsInstance<SparseVariableAxisNode>()) {
+      CHECK(params.size() == 2)
+          << "ValueError: The number of function parameters for sparse-variable axes should be 2";
+    } else if (obj->IsInstance<SparseBufferNode>()) {
+      CHECK(params.size() == 1)
+          << "ValueError: The number of function parameters for SparseBuffer should be 1";
+    } else {
+      LOG(FATAL) << "ValueError: " << obj->_type_key << " is not a sparse data structure";
+    }
+
+    sp_struct_param_map.Set(obj, params);
+  }
+
+  ObjectPtr<SparseBlockNode> node = make_object<SparseBlockNode>();
+  node->sp_iter_vars = std::move(sp_iter_vars);
+  node->sp_structs = std::move(sp_structs);
+  node->sp_struct_param_map = std::move(sp_struct_param_map);
+  node->name = std::move(name);
+  node->body = std::move(body);
+  node->init = std::move(init);
+  node->span = std::move(span);
+  data_ = std::move(node);
+}
+
+TVM_REGISTER_GLOBAL("tir.SparseBlock")
+    .set_body_typed([](Array<SpIterVar> sp_iter_vars, Array<ObjectRef> sp_structs,
+                       Array<Array<Var>> sp_struct_params, String name, Stmt body,
+                       Optional<Stmt> init, Span span) {
+      return SparseBlock(sp_iter_vars, sp_structs, sp_struct_params, name, body, init, span);
+    });
+
+TVM_REGISTER_NODE_TYPE(SparseBlockNode);
+
+void PrintSparseBlockTitle(const SparseBlockNode* op, ReprPrinter* p) {
+  p->stream << "sparse_block " << op->name << "(";
+  for (int i = 0; i < static_cast<int>(op->sp_iter_vars.size()); ++i) {
+    p->Print(op->sp_iter_vars[i]);
+    if (i < static_cast<int>(op->sp_iter_vars.size()) - 1) {
+      p->stream << ", ";
+    }
+  }
+  p->stream << ")";
+}
+
+void PrintSparseBlockBody(const SparseBlockNode* op, ReprPrinter* p) {
+  // Print init
+  PrintInitStmt(op->init, p);
+  // Print body
+  p->Print(op->body);
+}
+
+TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
+    .set_dispatch<SparseBlockNode>([](const ObjectRef& node, ReprPrinter* p) {
+      auto* op = static_cast<const SparseBlockNode*>(node.get());
+      p->PrintIndent();
+      PrintSparseBlockTitle(op, p);
+      p->stream << " {\n";
+      p->indent += 2;
+
+      PrintSparseBlockBody(op, p);
 
       p->indent -= 2;
       p->PrintIndent();

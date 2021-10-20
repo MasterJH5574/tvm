@@ -971,6 +971,82 @@ def ldexp(x1, x2):
     return call_intrin(x1.dtype, "tir.ldexp", x1, x2)  # type: ignore
 
 
+def lower_bound(arr, val, l, r, span=None):
+    """Return the position to the first element in the arr[l:r] that is no less than val.
+
+    Parameters
+    ----------
+    arr : Var
+        Pointer to the 1D buffer to apply binary search on.
+
+    val : PrimExpr
+        Value of the lower bound to search for in the buffer.
+
+    l : PrimExpr
+        Start position to search for in the buffer.
+    
+    r : PrimExpr
+        End position to search for in the buffer.
+
+    span : Optional[Span]
+        The location of this expression in the source code.
+
+    Returns
+    -------
+    PrimExpr
+        The index of element in arr[l:r] that is no less then given value.
+    """
+    return _ffi_api.lower_bound(arr, val, l, r, span)  # type: ignore
+
+
+def upper_bound(arr, val, l, r, span=None):
+    """Return the position the first element in the arr that is greater than val.
+
+    Parameters
+    ----------
+    arr : Var
+        Pointer to the 1D buffer to apply binary search on.
+
+    val : PrimExpr
+        Value of the upper bound to search for in the buffer.
+
+    l : PrimExpr
+        Start position to search for in the buffer.
+    
+    r : PrimExpr
+        End position to search for in the buffer.
+
+    span : Optional[Span]
+        The location of this expression in the source code.
+
+    Returns
+    -------
+    PrimExpr
+        The index of element in arr[l:r] that is no less then given value.
+    """
+    return _ffi_api.upper_bound(arr, val, l, r, span)  # type: ignore
+
+
+def atomic_add(ptr, val, span=None):
+    """Perform an atomic add operation to ptr by the given val.
+
+    Parameters
+    ----------
+    ptr : Var
+        The pointer to the address we perform atomic add.
+    val : PrimExpr
+        The value to add.
+    span : Optional[Span]
+        The location of this expression in the source code.
+
+    Returns
+    -------
+    PrimExpr
+        The value on pointer before we perform the atomic add.
+    """
+    return _ffi_api.atomic_add(ptr, val, span)  # type: ignore
+
+
 def isnan(x, span=None):
     """Check if input value is Nan.
 

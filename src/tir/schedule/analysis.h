@@ -64,6 +64,17 @@ const PrimFuncNode* GetRootPrimFunc(const IRModule& mod, const StmtNode* root_bl
                                     GlobalVar* result_g_var);
 
 /*!
+ * \brief Get PrimFunc and GlobalVar that the sparse block belongs to
+ * \param mod The IRModule
+ * \param sp_block The sparse block inside the PrimFunc to be queried
+ * \param result_g_var The result GlobalVar
+ * \return The result PrimFunc where the sparse block belongs to
+ * \note This function returns the pointer instead of ObjectRef to avoid later copy-on-write
+ */
+const PrimFuncNode* GetPrimFuncFromSparseBlock(const IRModule& mod, const SparseBlockNode* sp_block,
+                                               GlobalVar* result_g_var);
+
+/*!
  * \brief Get the root node of the sref tree, which is the root block of the PrimFunc.
  * \param sref The given sref.
  * \return The root node of the sref tree which contains the given node.

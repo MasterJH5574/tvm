@@ -45,6 +45,26 @@ const PrimFuncNode* GetRootPrimFunc(const IRModule& mod, const StmtNode* root_bl
   throw;
 }
 
+const PrimFuncNode* GetPrimFuncFromSparseBlock(const IRModule& mod, const SparseBlockNode* sp_block,
+                                               GlobalVar* result_g_var) {
+  for (const auto& kv : mod->functions) {
+    const GlobalVar& g_var = kv.first;
+    const BaseFunc& base_func = kv.second;
+    if (const auto* func = base_func.as<PrimFuncNode>()) {
+      if (func->body.get() == sp_block) {
+        if (result_g_var != nullptr) {
+          *result_g_var = g_var;
+        }
+        return func;
+      }
+    }
+  }
+  LOG(FATAL) << "IndexError: Could not get the corresponding function in the schedule state of the "
+                "sparse block:\n"
+             << GetRef<SparseBlock>(sp_block);
+  throw;
+}
+
 /******** Scope ********/
 
 StmtSRef GetScopeRoot(const ScheduleState& self, const StmtSRef& sref,

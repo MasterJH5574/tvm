@@ -617,6 +617,12 @@ TVM_DLL Pass ExtractPrimFuncConstants();
  */
 TVM_DLL Pass RenormalizeSplitPattern();
 
+/*!
+ * \brief Lower SparseTIR to TIR.
+ * \return The pass.
+ */
+TVM_DLL Pass LowerSparseTIR();
+
 }  // namespace transform
 }  // namespace tir
 }  // namespace tvm

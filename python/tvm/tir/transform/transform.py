@@ -764,7 +764,6 @@ def ConvertForLoopsToSerial():
 
 def InjectSoftwarePipeline():
     """Transform annotated loops into pipelined one that parallelize producers and consumers
-
     Returns
     -------
     fpass : tvm.transform.Pass
@@ -793,3 +792,14 @@ def RenomalizeSplitPattern():
         The result pass
     """
     return _ffi_api.RenormalizeSplitPattern()  # type: ignore
+
+
+def LowerSparseTIR():
+    """Lower SparseTIR to TIR
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+    """
+    return _ffi_api.LowerSparseTIR()  # type: ignore

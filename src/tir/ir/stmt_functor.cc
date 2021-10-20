@@ -74,6 +74,11 @@ void StmtVisitor::VisitStmt_(const BufferStoreNode* op) {
   VisitArray(op->indices, [this](const PrimExpr& e) { this->VisitExpr(e); });
 }
 
+void StmtVisitor::VisitStmt_(const SparseBufferStoreNode* op) {
+  this->VisitExpr(op->value);
+  VisitArray(op->indices, [this](const PrimExpr& e) { this->VisitExpr(e); });
+}
+
 void StmtVisitor::VisitStmt_(const BufferRealizeNode* op) {
   VisitArray(op->bounds, [this](const Range& r) {
     this->VisitExpr(r->min);
@@ -151,6 +156,13 @@ void StmtVisitor::VisitStmt_(const BlockRealizeNode* op) {
   VisitArray(op->iter_values, [this](const PrimExpr& e) { this->VisitExpr(e); });
   this->VisitExpr(op->predicate);
   this->VisitStmt(op->block);
+}
+
+void StmtVisitor::VisitStmt_(const SparseBlockNode* op) {
+  if (op->init.defined()) {
+    this->VisitStmt(op->init.value());
+  }
+  this->VisitStmt(op->body);
 }
 
 class StmtMutator::Internal {
@@ -386,6 +398,20 @@ Stmt StmtMutator::VisitStmt_(const BufferStoreNode* op) {
   }
 }
 
+Stmt StmtMutator::VisitStmt_(const SparseBufferStoreNode* op) {
+  PrimExpr value = this->VisitExpr(op->value);
+  Array<PrimExpr> indices = Internal::Mutate(this, op->indices);
+
+  if (value.same_as(op->value) && indices.same_as(op->indices)) {
+    return GetRef<Stmt>(op);
+  } else {
+    auto n = CopyOnWrite(op);
+    n->value = std::move(value);
+    n->indices = std::move(indices);
+    return Stmt(n);
+  }
+}
+
 Stmt StmtMutator::VisitStmt_(const BufferRealizeNode* op) {
   Region bounds = Internal::Mutate(this, op->bounds);
   PrimExpr condition = this->VisitExpr(op->condition);
@@ -559,6 +585,23 @@ Stmt StmtMutator::VisitStmt_(const BlockRealizeNode* op) {
     n->iter_values = std::move(v);
     n->predicate = std::move(pred);
     n->block = Downcast<Block>(block);
+    return Stmt(n);
+  }
+}
+
+Stmt StmtMutator::VisitStmt_(const SparseBlockNode* op) {
+  Optional<Stmt> init = NullOpt;
+  if (op->init.defined()) {
+    init = VisitStmt(op->init.value());
+  }
+  Stmt body = VisitStmt(op->body);
+
+  if (init.same_as(op->init) && body.same_as(op->body)) {
+    return GetRef<SparseBlock>(op);
+  } else {
+    auto n = CopyOnWrite(op);
+    n->init = std::move(init);
+    n->body = std::move(body);
     return Stmt(n);
   }
 }

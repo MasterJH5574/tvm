@@ -253,11 +253,95 @@ def test_fma():
     assert mod["test_tir_fma"].body.body.value.op.name == "tir.call_llvm_pure_intrin"
 
 
+@T.prim_func
+def binary_search(a: T.handle, b: T.handle, c: T.handle, d: T.handle) -> None:
+    n = T.var('int32')
+    m = T.var('int32')
+    A = T.match_buffer(a, (n,), dtype='int32')
+    B = T.match_buffer(b, (m,), dtype='int32')
+    C = T.match_buffer(c, (m,), dtype='int32')
+    D = T.match_buffer(d, (m,), dtype='int32')
+    for i in T.serial(0, m):
+        with T.block('search'):
+            vi = T.axis.S(m, i)
+            T.reads([A[0:n], B[vi]])
+            T.writes([C[vi], D[vi]])
+            C[vi] = T.lower_bound(A.data, B[vi], 0, n)
+            D[vi] = T.upper_bound(A.data, B[vi], 0, n)
+
+
+@T.prim_func
+def global_add(a: T.handle) -> None:
+    A = T.match_buffer(a, (1,), dtype='int32')
+    for i in T.serial(0, 1024):
+        with T.block('global_add'):
+            T.block_attr({
+                "atomic": True
+            })
+            T.reads([A[0:1]])
+            T.writes([A[0:1]])
+            vi = T.axis.S(1024, i)
+            T.evaluate(T.atomic_add(A.data, vi))
+
+
+def test_binary_search():
+    sch = tir.Schedule(binary_search)
+    b = sch.get_block('search')
+    i, = sch.get_loops(b)
+    io, ii = sch.split(i, [1, None])
+    sch.bind(io, 'threadIdx.x')
+    sch.bind(ii, 'blockIdx.x')
+    f = tvm.build(sch.mod['main'], target='cuda')
+    # print(f.imported_modules[0].get_source())
+
+    x = np.arange(-128, 128).astype(np.int32)
+    y = np.random.randint(-200, 200, size=1024).astype(np.int32)
+    a = np.zeros((1024,)).astype(np.int32)
+    b = np.zeros((1024,)).astype(np.int32)
+
+    # numpy results
+    np_a = np.searchsorted(x, y, side='left').astype(np.int32)
+    np_b = np.searchsorted(x, y, side='right').astype(np.int32)
+
+    # tvm results
+    dev = tvm.cuda(0)
+    x_array = tvm.nd.array(x, device=dev)
+    y_array = tvm.nd.array(y, device=dev)
+    a_array = tvm.nd.array(a, device=dev)
+    b_array = tvm.nd.array(b, device=dev)
+    f(x_array, y_array, a_array, b_array)
+    tvm_a = a_array.numpy()
+    tvm_b = b_array.numpy()
+
+    # verify result
+    tvm.testing.assert_allclose(np_a, tvm_a)
+    tvm.testing.assert_allclose(np_b, tvm_b)
+
+
+def test_global_add():
+    sch = tir.Schedule(global_add)
+    b = sch.get_block('global_add')
+    i, = sch.get_loops(b)
+    sch.bind(i, 'blockIdx.x')
+    f = tvm.build(sch.mod['main'], target='cuda')
+
+    # create input and run kernel
+    dev = tvm.cuda(0)
+    a = np.zeros((1,)).astype(np.int32)
+    a_gpu = tvm.nd.array(a, device=dev)
+    f(a_gpu)
+
+    # check output
+    tvm.testing.assert_allclose(a_gpu.numpy(), np.array([1024 * 1023 / 2]).astype(np.int32))
+
+
 if __name__ == "__main__":
     test_nearbyint()
     test_unary_intrin()
     test_round_intrinsics_on_int()
     test_binary_intrin()
     test_ldexp()
-    test_clz()
+    # test_clz()
     test_fma()
+    test_binary_search()
+    test_global_add()

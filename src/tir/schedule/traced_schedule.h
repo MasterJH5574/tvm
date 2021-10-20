@@ -97,6 +97,10 @@ class TracedScheduleNode : public ConcreteScheduleNode {
   void Unannotate(const BlockRV& block_rv, const String& ann_key) override;
   /******** Schedule: Misc ********/
   void EnterPostproc() final;
+  /******** Schedule: SparseTIR schedules ********/
+  SparseBlockRV GetSparseBlock(const String& name, const String& func_name = "main") final;
+  Array<SpIterVar> GetSpIters(const SparseBlockRV& block_rv) final;
+  void SparseReorder(const SparseBlockRV& block, const Array<SpIterVar>& new_order) final;
 };
 
 }  // namespace tir

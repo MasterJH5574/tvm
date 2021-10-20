@@ -33,6 +33,7 @@
 #include <vector>
 
 #include "literal/cuda_half_t.h"
+#include "literal/cuda_binary_search.h"
 #include "ptx_mma.h"
 
 namespace tvm {
@@ -131,6 +132,10 @@ std::string CodeGenCUDA::Finish() {
 
   if (need_mma_h_) {
     decl_stream << "#include <mma.h>\n";
+  }
+
+  if (need_binary_search_) {
+    decl_stream << _cuda_binary_search_def;
   }
 
   decl_stream << "\n#ifdef _WIN32\n";
@@ -756,6 +761,37 @@ void CodeGenCUDA::VisitExpr_(const CallNode* op, std::ostream& os) {
                                             a_ref, a_bias, b_ref, b_bias, c_ref, c_bias, saturate);
 
     this->stream << asm_code;
+  } else if (op->op.same_as(builtin::tvm_lower_bound())) {
+    need_binary_search_ = true;
+    os << "__lower_bound(";
+    ICHECK_EQ(op->args.size(), 4U);
+    this->PrintExpr(op->args[0], os);
+    os << ", ";
+    this->PrintExpr(op->args[1], os);
+    os << ", ";
+    this->PrintExpr(op->args[2], os);
+    os << ", ";
+    this->PrintExpr(op->args[3], os);
+    os << ")";
+  } else if (op->op.same_as(builtin::tvm_upper_bound())) {
+    need_binary_search_ = true;
+    os << "__upper_bound(";
+    ICHECK_EQ(op->args.size(), 4U);
+    this->PrintExpr(op->args[0], os);
+    os << ", ";
+    this->PrintExpr(op->args[1], os);
+    os << ", ";
+    this->PrintExpr(op->args[2], os);
+    os << ", ";
+    this->PrintExpr(op->args[3], os);
+    os << ")";
+  } else if (op->op.same_as(builtin::tvm_atomic_add())) {
+    os << "atomicAdd(";
+    ICHECK_EQ(op->args.size(), 2U);
+    this->PrintExpr(op->args[0], os);
+    os << ", ";
+    this->PrintExpr(op->args[1], os);
+    os << ")";
   } else {
     CodeGenC::VisitExpr_(op, os);
   }

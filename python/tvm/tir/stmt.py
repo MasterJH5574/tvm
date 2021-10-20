@@ -35,7 +35,8 @@ from tvm.runtime import Object, const
 
 from . import _ffi_api
 from .buffer import Buffer
-from .expr import IterVar
+from .expr import Var, IterVar
+from .sparse import SpIterVar, SparseBuffer
 
 
 class Stmt(Object):
@@ -241,6 +242,31 @@ class BufferStore(Stmt):
     def __init__(self, buffer, value, indices, span=None):
         self.__init_handle_by_constructor__(
             _ffi_api.BufferStore, buffer, value, indices, span  # type: ignore
+        )
+
+
+@tvm._ffi.register_object("tir.SparseBufferStore")
+class SparseBufferStore(Stmt):
+    """SparseBufferStore node.
+
+    Parameters
+    ----------
+    buffer : SparseBuffer
+        The sparse buffer to be accessed.
+
+    value : PrimExpr
+        The value to be stored.
+
+    indices : List[PrimExpr]
+        The indices location to be stored.
+
+    span : Optional[Span]
+        The location of this itervar in the source code.
+    """
+
+    def __init__(self, buffer, value, indices, span=None):
+        self.__init_handle_by_constructor__(
+            _ffi_api.SparseBufferStore, buffer, value, indices, span  # type: ignore
         )
 
 
@@ -644,6 +670,67 @@ class Block(Stmt):
             alloc_buffers,
             match_buffers,
             annotations,
+            span,
+        )  # type: ignore
+
+
+@tvm._ffi.register_object("tir.SparseBlock")
+class SparseBlock(Stmt):
+    """SparseBlock node.
+
+    Parameters
+    ----------
+    sp_iter_vars : List[SpIterVar]
+        The sparse iteration variables of the block.
+
+    sp_struct : List[Object]
+    The sparse data structures
+
+    sp_struct_params : List[List[Var]]
+    The function parameters that corresponding to each sparse data structures
+
+    sp_struct2param_map : Mapping[Object, List[Var]]
+        The mapping from sparse data structures to the PrimFunc parameters.
+
+    name : str
+        The name of the block.
+
+    body : Stmt
+        The body of the block.
+
+    init : Optional[Stmt]
+        The init statement of the block.
+
+    span : Optional[Span]
+        The location of this block in the source code.
+    """
+
+    sp_iter_vars: List[SpIterVar]
+    sp_struct: List[Object]
+    sp_struct2param_map: Mapping[Object, List[Var]]
+    name: str
+    body: Stmt
+    init: Optional[Stmt]
+    span: Optional[Span]
+
+    def __init__(
+        self,
+        sp_iter_vars: List[SpIterVar],
+        sp_struct: List[Object],
+        sp_struct_params: List[List[Var]],
+        name: str,
+        body: Stmt,
+        init: Optional[Stmt] = None,
+        span: Optional[Span] = None,
+    ):
+        self.__init_handle_by_constructor__(
+            _ffi_api.SparseBlock,  # type: ignore
+            sp_iter_vars,
+            sp_struct,
+            sp_struct_params,
+            name,
+            body,
+            init,
             span,
         )  # type: ignore
 

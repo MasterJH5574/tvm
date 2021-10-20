@@ -328,6 +328,60 @@ class BufferStore : public Stmt {
 };
 
 /*!
+ * \brief Store value to the high dimension sparse buffer.
+ *
+ * \code
+ *
+ *  buffer[i, j] = value;
+ *
+ * \endcode
+ * \sa SparseBufferStore
+ */
+class SparseBufferStoreNode : public StmtNode {
+ public:
+  /*! \brief The sparse buffer to be accessed. */
+  SparseBuffer buffer;
+  /*! \brief The value to be stored. */
+  PrimExpr value;
+  /*! \brief The indices location to be stored. */
+  Array<PrimExpr> indices;
+
+  void VisitAttrs(AttrVisitor* v) {
+    v->Visit("buffer", &buffer);
+    v->Visit("value", &value);
+    v->Visit("indices", &indices);
+    v->Visit("span", &span);
+  }
+
+  bool SEqualReduce(const SparseBufferStoreNode* other, SEqualReducer equal) const {
+    return equal(buffer, other->buffer) && equal(value, other->value) &&
+           equal(indices, other->indices);
+  }
+
+  void SHashReduce(SHashReducer hash_reduce) const {
+    hash_reduce(buffer);
+    hash_reduce(value);
+    hash_reduce(indices);
+  }
+
+  static constexpr const char* _type_key = "tir.SparseBufferStore";
+  TVM_DECLARE_FINAL_OBJECT_INFO(SparseBufferStoreNode, StmtNode);
+};
+
+/*!
+ * \brief Managed reference to SparseBufferStoreNode.
+ * \sa SparseBufferStoreNode
+ */
+class SparseBufferStore : public Stmt {
+ public:
+  TVM_DLL explicit SparseBufferStore(SparseBuffer buffer, PrimExpr value, Array<PrimExpr> indices,
+                                     Span span = Span());
+
+  TVM_DEFINE_OBJECT_REF_METHODS(SparseBufferStore, Stmt, SparseBufferStoreNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(SparseBufferStoreNode);
+};
+
+/*!
  * \brief Annotate the region where the buffer need to
  *  be read and write in the body.
  *  We only need to allocate the space for the corresponding region.
@@ -1316,7 +1370,66 @@ class BlockRealize : public Stmt {
   TVM_DEFINE_OBJECT_REF_COW_METHOD(BlockRealizeNode);
 };
 
-/*! \brief namespace of possible attributes in AttrStmt.attr_key */
+/*!
+ * \brief Sparse Block node.
+ */
+class SparseBlockNode : public StmtNode {
+ public:
+  /*! \brief The sparse iteration variables of the block. */
+  Array<SpIterVar> sp_iter_vars;
+  /*! \brief The sparse data structures */
+  Array<ObjectRef> sp_structs;
+  /*! \brief The mapping from sparse data structures to the PrimFunc parameters */
+  Map<ObjectRef, Array<Var>> sp_struct_param_map;
+  /*! \brief The name of the block */
+  String name;
+  /*! \brief The body of the block */
+  Stmt body;
+  /*! \brief The init statement of the block */
+  Optional<Stmt> init;
+
+  void VisitAttrs(AttrVisitor* v) {
+    v->Visit("sp_iter_vars", &sp_iter_vars);
+    v->Visit("sp_structs", &sp_structs);
+    v->Visit("sp_struct_param_map", &sp_struct_param_map);
+    v->Visit("name", &name);
+    v->Visit("body", &body);
+    v->Visit("init", &init);
+  }
+
+  bool SEqualReduce(const SparseBlockNode* other, SEqualReducer equal) const {
+    return equal(sp_iter_vars, other->sp_iter_vars) && equal(name, other->name) &&
+           equal(body, other->body) && equal(init, other->init) &&
+           equal(sp_structs, other->sp_structs);
+  }
+
+  void SHashReduce(SHashReducer hash_reduce) const {
+    hash_reduce(sp_iter_vars);
+    hash_reduce(name);
+    hash_reduce(body);
+    hash_reduce(init);
+    hash_reduce(sp_structs);
+  }
+
+  static constexpr const char* _type_key = "tir.SparseBlock";
+  TVM_DECLARE_FINAL_OBJECT_INFO(SparseBlockNode, StmtNode);
+};
+
+/*!
+ * \brief Managed reference to SparseBufferNode
+ * \sa SparseBufferNode
+ */
+class SparseBlock : public Stmt {
+ public:
+  TVM_DLL explicit SparseBlock(Array<SpIterVar> sp_iter_vars, Array<ObjectRef> sp_structs,
+                               Array<Array<Var>> sp_struct_params, String name, Stmt body,
+                               Optional<Stmt> init = NullOpt, Span span = Span());
+
+  TVM_DEFINE_OBJECT_REF_METHODS(SparseBlock, Stmt, SparseBlockNode);
+  TVM_DEFINE_OBJECT_REF_COW_METHOD(SparseBlockNode);
+};
+
+/*! \brief namespace of possible attribute sin AttrStmt.attr_key */
 namespace attr {
 // The above attr does not pass to ir stage.
 /*! \brief Mark launching extent of thread, used by device API. */

@@ -17,9 +17,20 @@
 """TVM Script Parser Intrinsic Classes"""
 # pylint: disable=redefined-builtin, relative-beyond-top-level
 import builtins
-from typing import List, Any
+from typing import List, Optional, Any
 
 import tvm.tir
+from tvm.ir import Span
+from tvm.tir.sparse import (
+    Axis,
+    DenseFixedAxis,
+    DenseVariableAxis,
+    SpIterVar,
+    SparseFixedAxis,
+    SparseVariableAxis,
+    DenseFromSparseAxis,
+    FusedAxis
+)
 from ..registry import register
 from ..utils import get_param_list, tvm_span_from_synr
 
@@ -109,6 +120,21 @@ def min_value(dtype, span):
 @register
 def max_value(dtype, span):
     return tvm.tir.max_value(dtype, span)
+
+
+@register
+def lower_bound(arr, val, l, r, span):
+    return tvm.tir.lower_bound(arr, val, l, r, span)
+
+
+@register
+def upper_bound(arr, val, l, r, span):
+    return tvm.tir.upper_bound(arr, val, l, r, span)
+
+
+@register
+def atomic_add(ptr, val, span):
+    return tvm.tir.atomic_add(ptr, val, span)
 
 
 @register
@@ -234,3 +260,16 @@ def comm_reducer(lambda_io, identities, span):
         lambda_output = (lambda_output,)
 
     return tvm.tir.CommReducer(x, y, lambda_output, identities, span)
+
+
+@register
+def dense(axis: Axis, span: Optional[Span] = None):
+    if isinstance(axis, (SparseFixedAxis, SparseVariableAxis)):
+        return DenseFromSparseAxis(axis)
+    else:
+        return axis
+
+
+@register
+def fuse(*group: List[Axis], span: Optional[Span] = None):
+    return [FusedAxis(group, i) for i, _ in enumerate(group)]
