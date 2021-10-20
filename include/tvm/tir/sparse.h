@@ -125,6 +125,8 @@ class DenseFixedAxisNode : public DenseAxisNode {
  */
 class DenseFixedAxis : public DenseAxis {
  public:
+  TVM_DLL explicit DenseFixedAxis(String name, PrimExpr length);
+
   TVM_DEFINE_OBJECT_REF_METHODS(DenseFixedAxis, DenseAxis, DenseFixedAxisNode);
 };
 
@@ -158,8 +160,9 @@ class DenseVariableAxisNode : public DenseAxisNode {
  */
 class DenseVariableAxis : public DenseAxis {
  public:
-  TVM_DEFINE_OBJECT_REF_METHODS(DenseVariableAxis, DenseAxis,
-                                DenseVariableAxisNode);
+  TVM_DLL explicit DenseVariableAxis(String name, PrimExpr length, Buffer indptr);
+
+  TVM_DEFINE_OBJECT_REF_METHODS(DenseVariableAxis, DenseAxis, DenseVariableAxisNode);
 };
 
 /*!
@@ -218,8 +221,9 @@ class SparseFixedAxisNode : public SparseAxisNode {
  */
 class SparseFixedAxis : public SparseAxis {
  public:
-  TVM_DEFINE_OBJECT_REF_METHODS(SparseFixedAxis, SparseAxis,
-                                SparseFixedAxisNode);
+  TVM_DLL explicit SparseFixedAxis(String name, PrimExpr length, Buffer indices, PrimExpr num_cols);
+
+  TVM_DEFINE_OBJECT_REF_METHODS(SparseFixedAxis, SparseAxis, SparseFixedAxisNode);
 };
 
 /*!
@@ -259,8 +263,9 @@ class SparseVariableAxisNode : public SparseAxisNode {
  */
 class SparseVariableAxis : public SparseAxis {
  public:
-  TVM_DEFINE_OBJECT_REF_METHODS(SparseVariableAxis, SparseAxis,
-                                SparseVariableAxisNode);
+  TVM_DLL explicit SparseVariableAxis(String name, PrimExpr length, Buffer indptr, Buffer indices);
+
+  TVM_DEFINE_OBJECT_REF_METHODS(SparseVariableAxis, SparseAxis, SparseVariableAxisNode);
 };
 
 /*!

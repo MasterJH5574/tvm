@@ -22,11 +22,49 @@
  * \brief buffers and formats in sparse tir.
  */
 #include <tvm/tir/buffer.h>
+#include <tvm/tir/sparse.h>
 
 namespace tvm {
 namespace tir {
 
+namespace sparse {
+
+DenseFixedAxis::DenseFixedAxis(String name, PrimExpr length) {
+  ObjectPtr<DenseFixedAxisNode> node = make_object<DenseFixedAxisNode>();
+  node->name = std::move(name);
+  node->length = std::move(length);
+  data_ = std::move(node);
+}
+
+DenseVariableAxis::DenseVariableAxis(String name, PrimExpr length, Buffer indptr) {
+  ObjectPtr<DenseVariableAxisNode> node = make_object<DenseVariableAxisNode>();
+  node->name = std::move(name);
+  node->length = std::move(length);
+  node->indptr = std::move(indptr);
+  data_ = std::move(node);
+}
+
+SparseFixedAxis::SparseFixedAxis(String name, PrimExpr length, Buffer indices, PrimExpr num_cols) {
+  ObjectPtr<SparseFixedAxisNode> node = make_object<SparseFixedAxisNode>();
+  node->name = std::move(name);
+  node->length = std::move(length);
+  node->indices = std::move(indices);
+  node->num_cols = std::move(num_cols);
+  data_ = std::move(node);
+}
+
+SparseVariableAxis::SparseVariableAxis(String name, PrimExpr length, Buffer indptr,
+                                       Buffer indices) {
+  ObjectPtr<SparseVariableAxisNode> node = make_object<SparseVariableAxisNode>();
+  node->name = std::move(name);
+  node->length = std::move(length);
+  node->indptr = std::move(indptr);
+  node->indices = std::move(indices);
+  data_ = std::move(node);
+}
+
 // TODO(zihao/ruihang)
+}  // namespace sparse
 
 }  // namespace tir
 }  // namespace tvm
