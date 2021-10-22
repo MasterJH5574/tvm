@@ -56,3 +56,4 @@ from . import transform
 from . import analysis
 from . import stmt_functor
 from . import usmp
+from . import sparse
