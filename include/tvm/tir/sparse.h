@@ -314,6 +314,10 @@ class SparseBufferNode : public Object {
   /* Data type */
   runtime::DataType dtype;
 
+  inline int ndim() const {
+    return static_cast<int>(axes.size());
+  }
+
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("name", &tree);
     v->Visit("length", &axes);
