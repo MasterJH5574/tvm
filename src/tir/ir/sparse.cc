@@ -28,9 +28,6 @@
 namespace tvm {
 namespace tir {
 
-namespace sparse {
-
-
 // DenseFixedAxis
 DenseFixedAxis::DenseFixedAxis(String name, PrimExpr length) {
   ObjectPtr<DenseFixedAxisNode> node = make_object<DenseFixedAxisNode>();
@@ -165,8 +162,6 @@ TVM_REGISTER_GLOBAL("tir.sparse.SparseBuffer")
     .set_body_typed([](AxisTree tree, Array<Axis> axes, Buffer data, String name, DataType dtype) {
       return SparseBuffer(tree, axes, data, name, dtype);
     });
-
-}  // namespace sparse
 
 }  // namespace tir
 }  // namespace tvm

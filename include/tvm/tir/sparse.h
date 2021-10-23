@@ -32,7 +32,6 @@
 
 namespace tvm {
 namespace tir {
-namespace sparse {
 
 /*!
  * \brief Base type for axis in sparse formats.
@@ -352,7 +351,6 @@ class SparseBuffer : public ObjectRef {
   TVM_DEFINE_OBJECT_REF_METHODS(SparseBuffer, ObjectRef, SparseBufferNode);
 };
 
-}  // namespace sparse
 }  // namespace tir
 }  // namespace tvm
 
