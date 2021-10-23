@@ -148,23 +148,22 @@ TVM_REGISTER_GLOBAL("tir.sparse.AxisTree")
     });
 
 // SparseBuffer
-SparseBuffer::SparseBuffer(AxisTree tree, Array<Axis> axes, int ndim,
-                           Buffer data, DataType dtype) {
+SparseBuffer::SparseBuffer(AxisTree tree, Array<Axis> axes, Buffer data, String name,
+                           DataType dtype) {
   ObjectPtr<SparseBufferNode> node = make_object<SparseBufferNode>();
   node->tree = std::move(tree);
   node->axes = std::move(axes);
-  node->ndim = ndim;
   node->data = std::move(data);
-  node->dtype = std::move(dtype);
+  node->name = std::move(name);
+  node->dtype = dtype;
   data_ = std::move(node);
 }
 
 TVM_REGISTER_NODE_TYPE(SparseBufferNode);
 
 TVM_REGISTER_GLOBAL("tir.sparse.SparseBuffer")
-    .set_body_typed([](AxisTree root, Array<Axis> axes, int ndim, Buffer data, DataType dtype) {
-      // Todo(@ruihang): to be revised later
-      return SparseBuffer(root, axes, ndim, data, dtype);
+    .set_body_typed([](AxisTree tree, Array<Axis> axes, Buffer data, String name, DataType dtype) {
+      return SparseBuffer(tree, axes, data, name, dtype);
     });
 
 }  // namespace sparse
