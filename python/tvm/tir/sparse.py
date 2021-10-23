@@ -182,6 +182,9 @@ class SparseBuffer:
 
     data : Buffer
         The data of the sparse buffer
+
+    dtype : Optional[str]
+        The data type of the sparse buffer
     """
 
     tree: AxisTree
@@ -189,7 +192,8 @@ class SparseBuffer:
     ndim: int
     data: Buffer
 
-    def __init__(self, tree, axes, ndim, data):
+    def __init__(self, tree, axes, ndim, data, dtype=None):
+        dtype = "float32" if dtype is None else dtype
         self.__init_handle_by_constructor__(
-            _ffi_api.SparseBuffer, root, axes, ndim, data  # type: ignore
+            _ffi_api.SparseBuffer, tree, axes, ndim, data, dtype  # type: ignore
         )
