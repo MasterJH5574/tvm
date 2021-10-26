@@ -402,9 +402,16 @@ class SpIterVar : public ObjectRef {
   TVM_DLL explicit SpIterVar(String name, PrimExpr max_extent, SpIterKind kind,
                              Optional<Axis> axis = NullOpt);
 
+  /*!
+   * \return the corresponding var in the IterVar.
+   */
+  inline operator PrimExpr() const;
+
   TVM_DEFINE_OBJECT_REF_METHODS(SpIterVar, ObjectRef, SpIterVarNode);
 };
 
+// inline implementations
+inline SpIterVar::operator PrimExpr() const { return (*this)->var; }
 
 }  // namespace tir
 }  // namespace tvm
