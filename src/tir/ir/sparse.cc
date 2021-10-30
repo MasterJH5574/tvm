@@ -174,9 +174,9 @@ SpIterVar::SpIterVar(String name, PrimExpr max_extent, SpIterKind kind, bool is_
 TVM_REGISTER_NODE_TYPE(SpIterVarNode);
 
 TVM_REGISTER_GLOBAL("tir.sparse.SpIterVar")
-    .set_body_typed([](String name, PrimExpr max_extent, SpIterKind kind, bool is_reduction,
+    .set_body_typed([](String name, PrimExpr max_extent, int kind, bool is_reduction,
                        Optional<Axis> axis) {
-      return SpIterVar(name, max_extent, kind, is_reduction, axis);
+      return SpIterVar(name, max_extent, SpIterKind(kind), is_reduction, axis);
     });
 
 }  // namespace tir
