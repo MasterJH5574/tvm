@@ -164,7 +164,8 @@ TVM_REGISTER_GLOBAL("tir.sparse.SparseBuffer")
     });
 
 // SpIterVar
-SpIterVar::SpIterVar(String name, PrimExpr max_extent, SpIterKind kind, Optional<Axis> axis) {
+SpIterVar::SpIterVar(String name, PrimExpr max_extent, SpIterKind kind, bool is_reduction,
+                     Optional<Axis> axis) {
   ObjectPtr<SpIterVarNode> node = make_object<SpIterVarNode>();
 
   if (kind != SpIterKind::kDenseFixed) {
@@ -175,6 +176,7 @@ SpIterVar::SpIterVar(String name, PrimExpr max_extent, SpIterKind kind, Optional
   node->var = Var(std::move(name));
   node->max_extent = std::move(max_extent);
   node->kind = kind;
+  node->is_reduction = is_reduction;
   node->axis = std::move(axis);
   data_ = std::move(node);
 }
@@ -182,8 +184,8 @@ SpIterVar::SpIterVar(String name, PrimExpr max_extent, SpIterKind kind, Optional
 TVM_REGISTER_NODE_TYPE(SpIterVarNode);
 
 TVM_REGISTER_GLOBAL("tir.sparse.SpIterVar")
-    .set_body_typed([](String name, PrimExpr max_extent, SpIterKind kind, Optional<Axis> axis) {
-      return SpIterVar(name, max_extent, kind, axis);
+    .set_body_typed([](String name, PrimExpr max_extent, SpIterKind kind, bool is_reduction, Optional<Axis> axis) {
+      return SpIterVar(name, max_extent, kind, is_reduction, axis);
     });
 
 }  // namespace tir
