@@ -179,7 +179,7 @@ SpIterVar::SpIterVar(String name, PrimExpr max_extent, SpIterKind kind, bool is_
   node->var = Var(std::move(name));
   node->max_extent = std::move(max_extent);
   node->kind = kind;
-  node->is_reduction = is_reduction;  
+  node->is_reduction = is_reduction;
   node->axis = std::move(axis);
   data_ = std::move(node);
 }

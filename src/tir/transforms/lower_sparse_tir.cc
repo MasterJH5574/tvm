@@ -140,7 +140,7 @@ class IndexTransformer : public StmtExprMutator {
       CHECK(sp_iter) << "ValueError: Currently an index is only allowed to be SpIterVar";
 
       PrimExpr l = AccumulateLowerIndex(lowered_index, sp_buffer, i, 0);
-      PrimExpr r = AccumulateLowerIndex(Add(lowered_index, 1), sp_buffer, i, 0);
+      PrimExpr r = AccumulateLowerIndex(add(lowered_index, 1), sp_buffer, i, 0);
 
       SpIterKind kind = sp_iter->kind;
       if (kind == SpIterKind::kDenseFixed) {
@@ -228,10 +228,10 @@ class IndexTransformer : public StmtExprMutator {
       return ana_.Simplify(std::move(prev_lowered_index) * axis->length + std::move(index));
     } else if (const auto* dv_axis = axis.as<DenseVariableAxisNode>()) {
       return ana_.Simplify(
-          Add(BufferLoad(dv_axis->indptr, {std::move(prev_lowered_index)}), std::move(index)));
+          add(BufferLoad(dv_axis->indptr, {std::move(prev_lowered_index)}), std::move(index)));
     } else if (const auto* sv_axis = axis.as<SparseVariableAxisNode>()) {
       return ana_.Simplify(
-          Add(BufferLoad(sv_axis->indptr, {std::move(prev_lowered_index)}), std::move(index)));
+          add(BufferLoad(sv_axis->indptr, {std::move(prev_lowered_index)}), std::move(index)));
     }
     LOG(FATAL) << "Cannot reach here";
     throw;
@@ -242,13 +242,13 @@ class IndexTransformer : public StmtExprMutator {
     CHECK(kind == SpIterKind::kSparseFixed || kind == SpIterKind::kSparseVariable);
     Axis iterated_axis = sp_iter->axis.value();
 
-    std::pair<SparseBuffer, int> depended_pair = dependency_map_[GetRef<SpIterVar>(sp_iter)];
-    Array<SpIterVar> buffer_access_iters = buffer_access_map_[depended_pair.first];
-    int n_depended = depended_pair.second;
+    std::pair<SparseBuffer, int> dependent_pair = dependency_map_[GetRef<SpIterVar>(sp_iter)];
+    Array<SpIterVar> buffer_access_iters = buffer_access_map_[dependent_pair.first];
+    int n_dependent = dependent_pair.second;
 
-    Array<PrimExpr> depended_iters{buffer_access_iters.begin(),
-                                   buffer_access_iters.begin() + n_depended};
-    PrimExpr lowered_indices = LowerIndices(depended_pair.first, depended_iters);
+    Array<PrimExpr> dependent_iters{buffer_access_iters.begin(),
+                                    buffer_access_iters.begin() + n_dependent};
+    PrimExpr lowered_indices = LowerIndices(dependent_pair.first, dependent_iters);
 
     if (kind == SpIterKind::kSparseFixed) {
       return BufferLoad(Downcast<SparseFixedAxis>(iterated_axis)->indices,
