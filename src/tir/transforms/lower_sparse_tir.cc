@@ -52,7 +52,7 @@ using BufferAccessMap = Map<SparseBuffer, Array<SpIterVar>>;
 using DependencyMap =
     std::unordered_map<SpIterVar, std::pair<SparseBuffer, int>, ObjectPtrHash, ObjectPtrEqual>;
 
-/*！
+/*!
  * \brief For each sparse-fixed or sparse-variable iterator, collect the iterators that it depends
  * on.
  */
