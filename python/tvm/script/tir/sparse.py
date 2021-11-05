@@ -199,9 +199,23 @@ def to_dense(axis: Axis, span: Optional[Span] = None):
 
 @register
 def cord(axis: Axis, span: Optional[Span] = None):
-    return 'cord', axis
+    # The field `var` and `is_reduction` will be updated in SparseBlock scope handler
+    var_temp = tvm.te.var()
+    if isinstance(axis, DenseVariableAxis):
+        return SpIterVar(var_temp, axis.length, SpIterVar.DenseVariable, False, axis)
+    else:
+        return SpIterVar(var_temp, axis.length, SpIterVar.DenseFixed, False)
 
 
 @register
 def pos(axis: Axis, span: Optional[Span] = None):
-    return 'pos', axis
+    # The field `var` and `is_reduction` will be updated in SparseBlock scope handler
+    var_temp = tvm.te.var()
+    if isinstance(axis, DenseFixedAxis):
+        return SpIterVar(var_temp, axis.length, SpIterVar.DenseFixed, False)
+    elif isinstance(axis, DenseVariableAxis):
+        return SpIterVar(var_temp, axis.length, SpIterVar.DenseVariable, False, axis)
+    elif isinstance(axis, SparseFixedAxis):
+        return SpIterVar(var_temp, axis.length, SpIterVar.SparseFixed, False, axis)
+    else:
+        return SpIterVar(var_temp, axis.length, SpIterVar.SparseVariable, False, axis)
