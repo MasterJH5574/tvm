@@ -328,25 +328,39 @@ class SparseBlock(WithScopeHandler):
     """With scope handler of SparseBlock"""
 
     def __init__(self):
-        def iter(axes: List, name: str = "", span: Optional[Span] = None):
+        def iter(iters: List, iter_types: str, name: str = "", span: Optional[Span] = None):
             assert (
                 self.node and self.context and self.body
             ), "call 'exit_scope' before 'enter_scope'"
 
-            if len(axes) != len(self.sp_iters):
+            if len(iters) != len(self.sp_iters):
                 self.context.report_error(
-                    "Inconsistent number of sparse iteration variables, "
-                    + f"there are {len(axes)} axes but {len(self.sp_iters)} iteration variables. "
-                    + "The number of sparse iteration variables should match the number of axes.",
+                    "Inconsistent number of sparse iteration variable names, "
+                    + f"there are {len(iters)} iterators but {len(self.sp_iters)} names. "
+                    + "The number of sparse iteration variable names should match the number of iterators.",
                     self.node.span,
                 )
+            if len(iters) != len(iter_types):
+                self.context.report_error(
+                    "Inconsistent number of sparse iteration variable types, "
+                    + f"there are {len(iters)} iterators but {len(iter_types)} types. "
+                    + "The number of sparse iteration variable types should match the number of iterators.",
+                    self.node.span,
+                )
+                pass
 
             sp_iters: List[SpIterVar] = []
-            for i, axis in enumerate(axes):
-                sp_iter = tvm.runtime.convert(axis)  # Todo: ???
+            for i, sp_iter in enumerate(iters):
                 assert isinstance(sp_iter, SpIterVar)
+                is_reduction = True if iter_types[i] == "R" else False
                 sp_iters.append(
-                    SpIterVar(self.sp_iters[i], sp_iter.max_extent, sp_iter.kind, sp_iter.axis)
+                    SpIterVar(
+                        self.sp_iters[i],
+                        sp_iter.max_extent,
+                        sp_iter.kind,
+                        is_reduction,
+                        sp_iter.axis,
+                    )
                 )
             # Todo: create a sparse block here
             #       and return that block
