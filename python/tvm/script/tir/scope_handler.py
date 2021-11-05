@@ -332,6 +332,7 @@ class SparseBlock(WithScopeHandler):
             assert (
                 self.node and self.context and self.body
             ), "call 'exit_scope' before 'enter_scope'"
+            block_info = self.context.block_info_stack[-1]
 
             if len(iters) != len(self.sp_iters):
                 self.context.report_error(
@@ -347,7 +348,6 @@ class SparseBlock(WithScopeHandler):
                     + "The number of sparse iteration variable types should match the number of iterators.",
                     self.node.span,
                 )
-                pass
 
             sp_iters: List[SpIterVar] = []
             for i, sp_iter in enumerate(iters):
@@ -362,8 +362,16 @@ class SparseBlock(WithScopeHandler):
                         sp_iter.axis,
                     )
                 )
-            # Todo: create a sparse block here
-            #       and return that block
+
+            block = tvm.tir.SparseBlock(
+                sp_iters,
+                list(self.context.func_sparse_buffer_map.values),
+                name,
+                self.body,
+                block_info.init,
+                span,
+            )
+            return block
 
         super().__init__(func=iter, concise_scope=False, def_symbol=True)
         self.sp_iters = None
