@@ -19,10 +19,12 @@
 from typing import Tuple, Any, Callable, Optional, List, Union, Mapping
 
 import synr
+from synr.ast import With
 import tvm.tir
 from tvm.runtime import Object
 from tvm.ir import Span, Range
 from tvm.tir import Stmt, PrimExpr, IterVar, Var, Buffer, BufferRegion, ForKind
+from tvm.tir.sparse import SpIterVar
 
 from .node import BufferSlice
 from .utils import buffer_slice_to_region
@@ -319,6 +321,55 @@ class Block(WithScopeHandler):
                 f"but got {optional_vars}",
                 node.span,
             )
+
+
+@register
+class SparseBlock(WithScopeHandler):
+    """With scope handler of SparseBlock"""
+
+    def __init__(self):
+        def iter(axes: List, name: str = "", span: Optional[Span] = None):
+            assert (
+                self.node and self.context and self.body
+            ), "call 'exit_scope' before 'enter_scope'"
+
+            if len(axes) != len(self.sp_iters):
+                self.context.report_error(
+                    "Inconsistent number of sparse iteration variables, "
+                    + f"there are {len(axes)} axes but {len(self.sp_iters)} iteration variables. "
+                    + "The number of sparse iteration variables should match the number of axes.",
+                    self.node.span,
+                )
+
+            sp_iters: List[SpIterVar] = []
+            for i, axis in enumerate(axes):
+                sp_iter = tvm.runtime.convert(axis)  # Todo: ???
+                assert isinstance(sp_iter, SpIterVar)
+                sp_iters.append(
+                    SpIterVar(self.sp_iters[i], sp_iter.max_extent, sp_iter.kind, sp_iter.axis)
+                )
+            # Todo: create a sparse block here
+            #       and return that block
+
+        super().__init__(func=iter, concise_scope=False, def_symbol=True)
+        self.sp_iters = None
+
+    def enter_scope(
+        self,
+        node: synr.ast.Node,
+        context: ContextMaintainer,
+        arg_list: List[Any],
+        span: synr.ast.Span,
+    ):
+        # define sparse iteration variables
+        assert isinstance(
+            node, synr.ast.With
+        ), f"SparseBlockScopeHandler expected to work on synr.ast.With but got {type(node)}"
+
+        vars = WithScopeHandler.get_optional_vars(node, context)
+        self.sp_iters = [tvm.tir.var(var.id.name, "int32") for var in vars]
+        for sp_iter in self.sp_iters:
+            context.update_symbol(sp_iter.name, sp_iter, node)
 
 
 @register
