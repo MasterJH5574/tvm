@@ -32,7 +32,7 @@ from .stmt import BufferStore, SparseBufferStore, BufferRealize, Store, Producer
 from .stmt import Allocate, AttrStmt
 from .stmt import ProducerRealize, SeqStmt
 from .stmt import IfThenElse, Evaluate, Prefetch, stmt_seq, stmt_list
-from .stmt import BufferRegion, MatchBufferRegion, Block, BlockRealize
+from .stmt import BufferRegion, MatchBufferRegion, Block, BlockRealize, SparseBlock
 
 from .function import PrimFunc
 
