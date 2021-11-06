@@ -359,7 +359,7 @@ class SpIterVarNode : public Object {
   PrimExpr max_extent;
   SpIterKind kind;
   bool is_reduction;
-  Optional<Axis> axis;
+  Axis axis;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("var", &var);
@@ -392,7 +392,7 @@ class SpIterVarNode : public Object {
 class SpIterVar : public ObjectRef {
  public:
   TVM_DLL explicit SpIterVar(Var var, PrimExpr max_extent, SpIterKind kind, bool is_reduction,
-                             Optional<Axis> axis = NullOpt);
+                             Axis axis);
 
   /*!
    * \return the corresponding var in the IterVar.

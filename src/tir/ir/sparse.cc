@@ -156,25 +156,20 @@ TVM_REGISTER_GLOBAL("tir.sparse.SparseBuffer")
     });
 
 // SpIterVar
-SpIterVar::SpIterVar(Var var, PrimExpr max_extent, SpIterKind kind, bool is_reduction,
-                     Optional<Axis> axis) {
+SpIterVar::SpIterVar(Var var, PrimExpr max_extent, SpIterKind kind, bool is_reduction, Axis axis) {
   ObjectPtr<SpIterVarNode> node = make_object<SpIterVarNode>();
 
   arith::Analyzer ana;
-  if (axis.defined()) {
-    CHECK(ana.CanProveEqual(axis.value()->length, max_extent));
-  }
-  if (kind != SpIterKind::kDenseFixed) {
-    CHECK(axis.defined()) << "ValueError: To create a SpIterVar that is not fixed-dense, one must "
-                             "specify the axis over which the SpIterVar iterates";
-    const char* err_str = "ValueError: The given kind doesn't match the type of the given axis";
-    if (kind == SpIterKind::kDenseVariable) {
-      CHECK(axis.value()->IsInstance<DenseFixedAxisNode>()) << err_str;
-    } else if (kind == SpIterKind::kSparseFixed) {
-      CHECK(axis.value()->IsInstance<SparseFixedAxisNode>()) << err_str;
-    } else if (kind == SpIterKind::kSparseVariable) {
-      CHECK(axis.value()->IsInstance<SparseVariableAxisNode>()) << err_str;
-    }
+  CHECK(ana.CanProveEqual(axis->length, max_extent));
+  const char* err_str = "ValueError: The given kind doesn't match the type of the given axis";
+  if (kind == SpIterKind::kDenseFixed) {
+    CHECK(!axis->IsInstance<DenseVariableAxisNode>()) << err_str;
+  } else if (kind == SpIterKind::kDenseVariable) {
+    CHECK(axis->IsInstance<DenseFixedAxisNode>()) << err_str;
+  } else if (kind == SpIterKind::kSparseFixed) {
+    CHECK(axis->IsInstance<SparseFixedAxisNode>()) << err_str;
+  } else if (kind == SpIterKind::kSparseVariable) {
+    CHECK(axis->IsInstance<SparseVariableAxisNode>()) << err_str;
   }
 
   node->var = Var(std::move(var));
@@ -188,8 +183,7 @@ SpIterVar::SpIterVar(Var var, PrimExpr max_extent, SpIterKind kind, bool is_redu
 TVM_REGISTER_NODE_TYPE(SpIterVarNode);
 
 TVM_REGISTER_GLOBAL("tir.sparse.SpIterVar")
-    .set_body_typed([](Var var, PrimExpr max_extent, int kind, bool is_reduction,
-                       Optional<Axis> axis) {
+    .set_body_typed([](Var var, PrimExpr max_extent, int kind, bool is_reduction, Axis axis) {
       return SpIterVar(var, max_extent, SpIterKind(kind), is_reduction, axis);
     });
 

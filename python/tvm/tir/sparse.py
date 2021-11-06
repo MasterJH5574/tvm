@@ -218,23 +218,22 @@ class SpIterVar(Object):
     is_reduction : bool
         Whether the SpIterVar is a reduction iterator
 
-    axis : Optional[Axis]
-        The axis over which the SpIterVar iterates. Required to be defined
-        when `kind` is not `DenseFixed`
+    axis : Axis
+        The axis over which the SpIterVar iterates
     """
 
     var: Var
     max_extent: PrimExpr
     kind: int
     is_reduction: bool
-    axis: Optional[Axis]
+    axis: Axis
 
     DenseFixed = 0
     DenseVariable = 1
     SparseFixed = 2
     SparseVariable = 3
 
-    def __init__(self, var, max_extent, kind, is_reduction, axis=None):
+    def __init__(self, var, max_extent, kind, is_reduction, axis):
         self.__init_handle_by_constructor__(
             _ffi_api.SpIterVar, var, max_extent, kind, is_reduction, axis  # type: ignore
         )
