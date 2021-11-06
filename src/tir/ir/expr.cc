@@ -1088,7 +1088,6 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
 // SparseBufferLoad
 SparseBufferLoad::SparseBufferLoad(SparseBuffer buffer, Array<PrimExpr> indices, Span span) {
   ObjectPtr<SparseBufferLoadNode> node = make_object<SparseBufferLoadNode>();
-  node->dtype = buffer->dtype;
   node->buffer = std::move(buffer);
   node->indices = std::move(indices);
   node->span = std::move(span);
