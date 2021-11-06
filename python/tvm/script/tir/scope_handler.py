@@ -365,7 +365,7 @@ class SparseBlock(WithScopeHandler):
 
             block = tvm.tir.SparseBlock(
                 sp_iters,
-                list(self.context.func_sparse_buffer_map.values),
+                list(self.context.func_sparse_buffer_map.values()),
                 name,
                 self.body,
                 block_info.init,
@@ -389,7 +389,7 @@ class SparseBlock(WithScopeHandler):
         ), f"SparseBlockScopeHandler expected to work on synr.ast.With but got {type(node)}"
 
         vars = WithScopeHandler.get_optional_vars(node, context)
-        self.sp_iters = [tvm.tir.var(var.id.name, "int32") for var in vars]
+        self.sp_iters = [tvm.te.var(var.id.name, "int32") for var in vars]
         for sp_iter in self.sp_iters:
             context.update_symbol(sp_iter.name, sp_iter, node)
 
