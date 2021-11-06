@@ -154,7 +154,7 @@ TVM_REGISTER_GLOBAL("tir.sparse.SparseBuffer")
     });
 
 // SpIterVar
-SpIterVar::SpIterVar(String name, PrimExpr max_extent, SpIterKind kind, bool is_reduction,
+SpIterVar::SpIterVar(Var var, PrimExpr max_extent, SpIterKind kind, bool is_reduction,
                      Optional<Axis> axis) {
   ObjectPtr<SpIterVarNode> node = make_object<SpIterVarNode>();
 
@@ -175,7 +175,7 @@ SpIterVar::SpIterVar(String name, PrimExpr max_extent, SpIterKind kind, bool is_
     }
   }
 
-  node->var = Var(std::move(name));
+  node->var = Var(std::move(var));
   node->max_extent = std::move(max_extent);
   node->kind = kind;
   node->is_reduction = is_reduction;
@@ -186,9 +186,9 @@ SpIterVar::SpIterVar(String name, PrimExpr max_extent, SpIterKind kind, bool is_
 TVM_REGISTER_NODE_TYPE(SpIterVarNode);
 
 TVM_REGISTER_GLOBAL("tir.sparse.SpIterVar")
-    .set_body_typed([](String name, PrimExpr max_extent, int kind, bool is_reduction,
+    .set_body_typed([](Var var, PrimExpr max_extent, int kind, bool is_reduction,
                        Optional<Axis> axis) {
-      return SpIterVar(name, max_extent, SpIterKind(kind), is_reduction, axis);
+      return SpIterVar(var, max_extent, SpIterKind(kind), is_reduction, axis);
     });
 
 }  // namespace tir

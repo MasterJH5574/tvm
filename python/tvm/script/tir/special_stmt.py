@@ -841,7 +841,7 @@ class DenseVariable(SpecialStmt):
         def dense_variable(
             name: str,
             shape: Tuple[PrimExpr, PrimExpr],
-            indptr: tvm.tir.Var,
+            indptr_var: tvm.tir.Var,
             idtype: str = "int32",
             span: Optional[Span] = None,
         ):
@@ -851,8 +851,9 @@ class DenseVariable(SpecialStmt):
                 (indptr_len,), dtype=idtype, name=name + "_indptr", span=span
             )
             axis = DenseVariableAxis(name, length, indptr_buf)
-            self.context.func_buffer_map[indptr] = indptr_buf
+            self.context.func_buffer_map[indptr_var] = indptr_buf
             self.context.update_symbol(var_name, axis, self.node)
+            self.context.update_symbol(name + "_indptr", indptr_buf, self.node)
 
         super().__init__(dense_variable, def_symbol=True)
 
@@ -865,7 +866,7 @@ class SparseFixed(SpecialStmt):
         def sparse_fixed(
             name: str,
             shape: Tuple[PrimExpr, PrimExpr, PrimExpr],
-            indices: tvm.tir.Var,
+            indices_var: tvm.tir.Var,
             idtype: str = "int32",
             span: Optional[Span] = None,
         ):
@@ -875,8 +876,9 @@ class SparseFixed(SpecialStmt):
                 (nnz,), dtype=idtype, name=name + "_indices", span=span
             )
             axis = SparseFixedAxis(name, length, indices_buf, nnz_cols)
-            self.context.func_buffer_map[indices] = indices_buf
+            self.context.func_buffer_map[indices_var] = indices_buf
             self.context.update_symbol(var_name, axis, self.node)
+            self.context.update_symbol(name + "_indices", indices_buf, self.node)
 
         super().__init__(sparse_fixed, def_symbol=True)
 
@@ -888,14 +890,14 @@ class SparseVariable(SpecialStmt):
     def __init__(self):
         def sparse_variable(
             name: str,
-            shape: Tuple[PrimExpr, PrimExpr],
+            shape: Tuple[PrimExpr, PrimExpr, PrimExpr],
             data: Tuple[tvm.tir.Var, tvm.tir.Var],
             idtype: str = "int32",
             span: Optional[Span] = None,
         ):
             var_name = self.node.lhs[0].id.name
             length, indptr_len, nnz = shape
-            indptr, indices = data
+            indptr_var, indices_var = data
             indptr_buf = tvm.tir.decl_buffer(
                 (indptr_len,), dtype=idtype, name=name + "_indptr", span=span
             )
@@ -903,9 +905,11 @@ class SparseVariable(SpecialStmt):
                 (nnz,), dtype=idtype, name=name + "_indices", span=span
             )
             axis = SparseVariableAxis(name, length, indptr_buf, indices_buf)
-            self.context.func_buffer_map[indices] = indices_buf
-            self.context.func_buffer_map[indptr] = indptr_buf
+            self.context.func_buffer_map[indices_var] = indices_buf
+            self.context.func_buffer_map[indptr_var] = indptr_buf
             self.context.update_symbol(var_name, axis, self.node)
+            self.context.update_symbol(name + "_indptr", indptr_buf, self.node)
+            self.context.update_symbol(name + "_indices", indices_buf, self.node)
 
         super().__init__(sparse_variable, def_symbol=True)
 
@@ -918,6 +922,7 @@ class MatchSparseBuffer(SpecialStmt):
         def match_sparse_buffer(
             param: tvm.tir.Var,
             axes: List[Axis],
+            nnz: PrimExpr,
             dtype: str = "float32",
             span: Optional[Span] = None,
         ):
@@ -935,8 +940,11 @@ class MatchSparseBuffer(SpecialStmt):
                 )
 
             if param in self.context.func_params:
-                buffer = tvm.tir.sparse.decl_buffer(axes, param, buffer_name, dtype, span=span)
+                data = tvm.tir.decl_buffer(nnz, dtype, buffer_name + "_data", span=span)
+                buffer = tvm.tir.sparse.SparseBuffer(axes, data, buffer_name)
+                self.context.func_buffer_map[param] = data
                 self.context.func_sparse_buffer_map[param] = buffer
+                self.context.update_symbol(buffer_name + "_data", data, self.node)
                 self.context.update_symbol(buffer_name, buffer, self.node)
             else:
                 self.context.report_error(
@@ -949,7 +957,7 @@ class MatchSparseBuffer(SpecialStmt):
 @register
 def to_dense(axis: Axis, span: Optional[Span] = None):
     if isinstance(axis, (SparseFixedAxis, SparseVariableAxis)):
-        return DenseFixedAxis(axis.name, axis.length, axis.idtype)
+        return DenseFixedAxis(axis.name + "_dense", axis.length)
     else:
         return axis
 
