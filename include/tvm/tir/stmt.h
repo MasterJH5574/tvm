@@ -339,7 +339,7 @@ class BufferStore : public Stmt {
  */
 class SparseBufferStoreNode : public StmtNode {
  public:
-  /*! \brief The buffer variable. */
+  /*! \brief The sparse buffer to be accessed. */
   SparseBuffer buffer;
   /*! \brief The value to be stored. */
   PrimExpr value;
