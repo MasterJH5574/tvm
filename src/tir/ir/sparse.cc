@@ -140,6 +140,8 @@ TVM_REGISTER_GLOBAL("tir.sparse.AxisTree")
 // SparseBuffer
 SparseBuffer::SparseBuffer(Array<Axis> axes, Buffer data, String name) {
   ObjectPtr<SparseBufferNode> node = make_object<SparseBufferNode>();
+  CHECK_GT(static_cast<int>(axes.size()), 0)
+      << "ValueError: A SparseBuffer should have at least one dimension";
   node->axes = std::move(axes);
   node->data = std::move(data);
   node->name = std::move(name);
