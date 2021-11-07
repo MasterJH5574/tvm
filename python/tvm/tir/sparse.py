@@ -61,13 +61,17 @@ class DenseFixedAxis(DenseAxis):
 
     length : PrimExpr
         The length of the axis
+
+    from_sparse : Optional[SparseAxis]
+        The SparseAxis that this axis is created from
     """
 
     name: str
     length: PrimExpr
+    from_sparse: Optional[SparseAxis]
 
-    def __init__(self, name, length):
-        self.__init_handle_by_constructor__(_ffi_api.DenseFixedAxis, name, length)  # type: ignore
+    def __init__(self, name, length, from_sparse=None):
+        self.__init_handle_by_constructor__(_ffi_api.DenseFixedAxis, name, length, from_sparse)  # type: ignore
 
 
 @tvm._ffi.register_object("tir.sparse.DenseVariableAxis")

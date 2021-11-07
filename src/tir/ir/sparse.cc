@@ -43,18 +43,20 @@ TVM_REGISTER_GLOBAL("tir.sparse.GetAxisIndexType").set_body_typed([](Axis axis) 
 });
 
 // DenseFixedAxis
-DenseFixedAxis::DenseFixedAxis(String name, PrimExpr length) {
+DenseFixedAxis::DenseFixedAxis(String name, PrimExpr length, Optional<SparseAxis> from_sparse) {
   ObjectPtr<DenseFixedAxisNode> node = make_object<DenseFixedAxisNode>();
   node->name = std::move(name);
   node->length = std::move(length);
+  node->from_sparse = std::move(from_sparse);
   data_ = std::move(node);
 }
 
 TVM_REGISTER_NODE_TYPE(DenseFixedAxisNode);
 
-TVM_REGISTER_GLOBAL("tir.sparse.DenseFixedAxis").set_body_typed([](String name, PrimExpr length) {
-  return DenseFixedAxis(name, length);
-});
+TVM_REGISTER_GLOBAL("tir.sparse.DenseFixedAxis")
+    .set_body_typed([](String name, PrimExpr length, Optional<SparseAxis> from_sparse) {
+      return DenseFixedAxis(name, length, from_sparse);
+    });
 
 // DenseVariableAxis
 DenseVariableAxis::DenseVariableAxis(String name, PrimExpr length, Buffer indptr) {

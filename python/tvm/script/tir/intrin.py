@@ -258,7 +258,7 @@ def comm_reducer(lambda_io, identities, span):
 @register
 def to_dense(axis: Axis, span: Optional[Span] = None):
     if isinstance(axis, (SparseFixedAxis, SparseVariableAxis)):
-        return DenseFixedAxis(axis.name + "_dense", axis.length)
+        return DenseFixedAxis(axis.name + "_dense", axis.length, axis)
     else:
         return axis
 

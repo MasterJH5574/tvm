@@ -100,22 +100,45 @@ class DenseAxis : public Axis {
 };
 
 /*!
+ * \brief Sparse axis whose column indices is not consecutive.
+ */
+class SparseAxisNode : public AxisNode {
+ public:
+  static constexpr const char* _type_key = "tir.sparse.SparseAxis";
+  TVM_DECLARE_BASE_OBJECT_INFO(SparseAxisNode, AxisNode);
+};
+
+/*!
+ * \brief Managed reference to SparseAxisNode.
+ * \sa SparseAxisNode
+ */
+class SparseAxis : public Axis {
+ public:
+  TVM_DEFINE_OBJECT_REF_METHODS(SparseAxis, Axis, SparseAxisNode);
+};
+
+/*!
  * \brief Dense axis with fixed length per row.
  */
 class DenseFixedAxisNode : public DenseAxisNode {
  public:
+  Optional<SparseAxis> from_sparse;
+
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("name", &name);
     v->Visit("length", &length);
+    v->Visit("from_sparse", &from_sparse);
   }
 
-  bool SEqualReduce(const DenseAxisNode* other, SEqualReducer equal) const {
-    return equal(name, other->name) && equal(length, other->length);
+  bool SEqualReduce(const DenseFixedAxisNode* other, SEqualReducer equal) const {
+    return equal(name, other->name) && equal(length, other->length) &&
+           equal(from_sparse, other->from_sparse);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
     hash_reduce(name);
     hash_reduce(length);
+    hash_reduce(from_sparse);
   }
 
   static constexpr const char* _type_key = "tir.sparse.DenseFixedAxis";
@@ -128,7 +151,8 @@ class DenseFixedAxisNode : public DenseAxisNode {
  */
 class DenseFixedAxis : public DenseAxis {
  public:
-  TVM_DLL explicit DenseFixedAxis(String name, PrimExpr length);
+  TVM_DLL explicit DenseFixedAxis(String name, PrimExpr length,
+                                  Optional<SparseAxis> from_sparse = NullOpt);
 
   TVM_DEFINE_OBJECT_REF_METHODS(DenseFixedAxis, DenseAxis, DenseFixedAxisNode);
 };
@@ -166,24 +190,6 @@ class DenseVariableAxis : public DenseAxis {
   TVM_DLL explicit DenseVariableAxis(String name, PrimExpr length, Buffer indptr);
 
   TVM_DEFINE_OBJECT_REF_METHODS(DenseVariableAxis, DenseAxis, DenseVariableAxisNode);
-};
-
-/*!
- * \brief Sparse axis whose column indices is not consecutive.
- */
-class SparseAxisNode : public AxisNode {
- public:
-  static constexpr const char* _type_key = "tir.sparse.SparseAxis";
-  TVM_DECLARE_BASE_OBJECT_INFO(SparseAxisNode, AxisNode);
-};
-
-/*!
- * \brief Managed reference to SparseAxisNode.
- * \sa SparseAxisNode
- */
-class SparseAxis : public Axis {
- public:
-  TVM_DEFINE_OBJECT_REF_METHODS(SparseAxis, Axis, SparseAxisNode);
 };
 
 /*!
