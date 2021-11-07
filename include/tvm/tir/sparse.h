@@ -291,13 +291,27 @@ class SparseVariableAxis : public SparseAxis {
 class AxisTreeNode : public Object {
  public:
   // unordered map that stores the parent relationship between axes.
-  std::unordered_map<String, Optional<String>, ObjectPtrHash, ObjectPtrEqual> parent;
+  Map<String, Optional<String>> parent;
   // unordered map that stores the children relationship between axes.
-  std::unordered_map<Optional<String>, Array<String>, ObjectPtrHash, ObjectPtrEqual> children;
+  Map<Optional<String>, Array<String>> children;
 
-  void VisitAttrs(AttrVisitor* v) {}
+  void VisitAttrs(AttrVisitor* v) {
+    v->Visit("parent", &parent);
+    v->Visit("children", &children);
+  }
+
+  bool SEqualReduce(const AxisTreeNode* other, SEqualReducer equal) const {
+    return equal(parent, other->parent) && equal(children, other->children);
+  }
+
+  void SHashReduce(SHashReducer hash_reduce) const {
+    hash_reduce(parent);
+    hash_reduce(children);
+  }
 
   static constexpr const char* _type_key = "tir.sparse.AxisTree";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
   TVM_DECLARE_FINAL_OBJECT_INFO(AxisTreeNode, Object);
 };
 
@@ -345,6 +359,8 @@ class SparseBufferNode : public Object {
   }
 
   static constexpr const char* _type_key = "tir.sparse.SparseBuffer";
+  static constexpr const bool _type_has_method_sequal_reduce = true;
+  static constexpr const bool _type_has_method_shash_reduce = true;
   TVM_DECLARE_FINAL_OBJECT_INFO(SparseBufferNode, Object);
 };
 

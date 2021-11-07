@@ -116,19 +116,26 @@ AxisTree::AxisTree(Array<String> axis_names, Array<Optional<String>> axis_parent
          "axis_parent_names "
          "array.";
   ObjectPtr<AxisTreeNode> node = make_object<AxisTreeNode>();
+  Map<String, Optional<String>> parent;
+  Map<Optional<String>, Array<String>> children;
   for (size_t i = 0; i < axis_names.size(); i++) {
     // update parent map & children map
     String axis_name = axis_names[i];
     Optional<String> parent_name = axis_parent_names[i];
-    node->parent[axis_name] = parent_name;
-    if (node->children.find(parent_name) != node->children.end()) {
-      node->children[parent_name].push_back(axis_name);
+    parent.Set(axis_name, parent_name);
+
+    auto it = children.find(parent_name);
+    if (it != children.end()) {
+      Array<String> value = (*it).second;
+      value.push_back(axis_name);
+      children.Set(parent_name, std::move(value));
     } else {
-      Array<String> children;
-      children.push_back(axis_name);
-      node->children[parent_name] = std::move(children);
+      Array<String> value{axis_name};
+      children.Set(parent_name, std::move(value));
     }
   }
+  node->parent = std::move(parent);
+  node->children = std::move(children);
   data_ = std::move(node);
 }
 
@@ -155,6 +162,20 @@ TVM_REGISTER_NODE_TYPE(SparseBufferNode);
 TVM_REGISTER_GLOBAL("tir.sparse.SparseBuffer")
     .set_body_typed([](Array<Axis> axes, Buffer data, String name) {
       return SparseBuffer(axes, data, name);
+    });
+
+TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
+    .set_dispatch<SparseBufferNode>([](const ObjectRef& node, ReprPrinter* p) {
+      auto* op = static_cast<const SparseBufferNode*>(node.get());
+      p->stream << "sparse_buffer(" << op->name << ", [";
+      for (int i = 0, n = static_cast<int>(op->axes.size()); i < n; ++i) {
+        const Axis& axis = op->axes[i];
+        p->stream << axis;
+        if (i < n - 1) {
+          p->stream << ", ";
+        }
+      }
+      p->stream << "], " << op->data << ")";
     });
 
 // SpIterVar
