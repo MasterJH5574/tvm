@@ -32,7 +32,6 @@ from tvm.tir.sparse import (
     Axis,
     DenseFixedAxis,
     DenseVariableAxis,
-    SpIterVar,
     SparseFixedAxis,
     SparseVariableAxis,
 )
@@ -968,35 +967,3 @@ class MatchSparseBuffer(SpecialStmt):
                 )
 
         super().__init__(match_sparse_buffer, def_symbol=True)
-
-
-@register
-def to_dense(axis: Axis, span: Optional[Span] = None):
-    if isinstance(axis, (SparseFixedAxis, SparseVariableAxis)):
-        return DenseFixedAxis(axis.name + "_dense", axis.length)
-    else:
-        return axis
-
-
-@register
-def cord(axis: Axis, span: Optional[Span] = None):
-    # The field `var` and `is_reduction` will be updated in SparseBlock scope handler
-    var_temp = tvm.te.var()
-    if isinstance(axis, DenseVariableAxis):
-        return SpIterVar(var_temp, axis.length, SpIterVar.DenseVariable, False, axis)
-    else:
-        return SpIterVar(var_temp, axis.length, SpIterVar.DenseFixed, False, axis)
-
-
-@register
-def pos(axis: Axis, span: Optional[Span] = None):
-    # The field `var` and `is_reduction` will be updated in SparseBlock scope handler
-    var_temp = tvm.te.var()
-    if isinstance(axis, DenseFixedAxis):
-        return SpIterVar(var_temp, axis.length, SpIterVar.DenseFixed, False, axis)
-    elif isinstance(axis, DenseVariableAxis):
-        return SpIterVar(var_temp, axis.length, SpIterVar.DenseVariable, False, axis)
-    elif isinstance(axis, SparseFixedAxis):
-        return SpIterVar(var_temp, axis.length, SpIterVar.SparseFixed, False, axis)
-    else:
-        return SpIterVar(var_temp, axis.length, SpIterVar.SparseVariable, False, axis)
