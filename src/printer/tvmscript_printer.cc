@@ -1258,15 +1258,20 @@ Doc TVMScriptPrinter::PrintSparseStructDefinitions(const SparseBlockNode* sp_blo
 
     if (const auto* sp_buffer = it.first.as<SparseBufferNode>()) {
       ICHECK_EQ(it.second.size(), 1);
-      std::vector<Doc> axes_doc;
-      axes_doc.reserve(sp_buffer->axes.size());
-      for (const Axis& axis : sp_buffer->axes) {
-        axes_doc.push_back(Print(axis));
+      Doc axes_doc;
+      if (sp_buffer->axes.size() != 1) {
+        std::vector<Doc> axes_docs;
+        axes_docs.reserve(sp_buffer->axes.size());
+        for (const Axis& axis : sp_buffer->axes) {
+          axes_docs.push_back(Print(axis));
+        }
+        axes_doc << PrintSep(axes_docs, Doc::Text(", "));
+      } else {
+        axes_doc << Print(sp_buffer->axes[0]) << ",";
       }
 
-      doc << "match_sparse_buffer(" << Print(it.second[0]) << ", ("
-          << PrintSep(axes_doc, Doc::Text(", ")) << "), " << Print(sp_buffer->data->shape[0])
-          << ", " << PrintDType(sp_buffer->data->dtype) << ")";
+      doc << "match_sparse_buffer(" << Print(it.second[0]) << ", (" << axes_doc << "), "
+          << Print(sp_buffer->data->shape[0]) << ", " << PrintDType(sp_buffer->data->dtype) << ")";
       sp_buf_docs.push_back(doc);
       continue;
     }
