@@ -319,8 +319,8 @@ class SparseBufferNode : public Object {
   inline int ndim() const { return static_cast<int>(axes.size()); }
 
   void VisitAttrs(AttrVisitor* v) {
-    v->Visit("length", &axes);
-    v->Visit("num_cols", &data);
+    v->Visit("axes", &axes);
+    v->Visit("data", &data);
     v->Visit("name", &name);
   }
 
