@@ -82,15 +82,21 @@ def bsrmm(a: T.handle, b: T.handle, c: T.handle, indptr: T.handle, indices: T.ha
 
 
 def test_csrmm():
-    pass
+    func = csrmm
+    rt_func = tvm.script.from_source(func.script(show_meta=True))
+    tvm.ir.assert_structural_equal(func, rt_func, True)
 
 
 def test_csr_reduce():
-    pass
+    func = csr_reduce
+    rt_func = tvm.script.from_source(func.script(show_meta=True))
+    tvm.ir.assert_structural_equal(func, rt_func, True)
 
 
 def test_bsrmm():
-    pass
+    func = bsrmm
+    rt_func = tvm.script.from_source(func.script(show_meta=True))
+    tvm.ir.assert_structural_equal(func, rt_func, True)
 
 
 if __name__ == "__main__":
