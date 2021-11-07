@@ -335,7 +335,7 @@ class BufferStore : public Stmt {
  *  buffer[i, j] = value;
  *
  * \endcode
- * \sa SparseBufferLoad
+ * \sa SparseBufferStore
  */
 class SparseBufferStoreNode : public StmtNode {
  public:
