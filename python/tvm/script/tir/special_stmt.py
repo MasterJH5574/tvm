@@ -855,7 +855,7 @@ class DenseVariable(SpecialStmt):
                     f"`dense_variable` expected assign to only one var, but got {names}", span
                 )
 
-            indptr_len, length = shape
+            length, indptr_len = shape
             indptr_buf = tvm.tir.decl_buffer(
                 (indptr_len,), dtype=idtype, name=names[0] + "_indptr", span=span
             )
