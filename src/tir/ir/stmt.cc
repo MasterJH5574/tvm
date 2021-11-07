@@ -1010,7 +1010,6 @@ void PrintSparseBlockBody(const SparseBlockNode* op, ReprPrinter* p) {
 
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     .set_dispatch<SparseBlockNode>([](const ObjectRef& node, ReprPrinter* p) {
-      // Todo
       auto* op = static_cast<const SparseBlockNode*>(node.get());
       p->PrintIndent();
       PrintSparseBlockTitle(op, p);
