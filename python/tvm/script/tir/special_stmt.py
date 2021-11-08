@@ -860,7 +860,7 @@ class DenseVariable(SpecialStmt):
                 (indptr_len,), dtype=idtype, name=names[0] + "_indptr", span=span
             )
             axis = DenseVariableAxis(names[0], length, indptr_buf)
-            self.context.sp_struct2param_map[axis] = indptr_var
+            self.context.sp_struct2param_map[axis] = [indptr_var]
             self.context.update_symbol(names[0], axis, self.node)
             self.context.update_symbol(names[0] + "_indptr", indptr_buf, self.node)
 

@@ -188,7 +188,7 @@ SpIterVar::SpIterVar(Var var, PrimExpr max_extent, SpIterKind kind, bool is_redu
   if (kind == SpIterKind::kDenseFixed) {
     CHECK(!axis->IsInstance<DenseVariableAxisNode>()) << err_str;
   } else if (kind == SpIterKind::kDenseVariable) {
-    CHECK(axis->IsInstance<DenseFixedAxisNode>()) << err_str;
+    CHECK(axis->IsInstance<DenseVariableAxisNode>()) << err_str;
   } else if (kind == SpIterKind::kSparseFixed) {
     CHECK(axis->IsInstance<SparseFixedAxisNode>()) << err_str;
   } else if (kind == SpIterKind::kSparseVariable) {
