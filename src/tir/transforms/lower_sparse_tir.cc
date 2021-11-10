@@ -78,8 +78,16 @@ class AccessAndDependencyCollector : public StmtExprVisitor {
     }
   }
 
-  BufferAccessMap buffer_access_map_;
-  DependencyMap dependency_map_;
+  void GetIteratedBufferAndDependentIters(const SpIterVar& sp_iter, SparseBuffer* iterated_buffer,
+                                          Array<PrimExpr>* dependent_iters) {
+    std::pair<SparseBuffer, int> dependent_pair = dependency_map_[sp_iter];
+    Array<SpIterVar> buffer_access_iters = buffer_access_map_[dependent_pair.first];
+    int n_dependent = dependent_pair.second;
+
+    *iterated_buffer = std::move(dependent_pair.first);
+    *dependent_iters =
+        Array<PrimExpr>{buffer_access_iters.begin(), buffer_access_iters.begin() + n_dependent};
+  }
 
  private:
   void AddAccessPattern(const SparseBuffer& buffer, const Array<PrimExpr>& indices) {
@@ -114,13 +122,15 @@ class AccessAndDependencyCollector : public StmtExprVisitor {
   void VisitExpr_(const SparseBufferLoadNode* load) final {
     AddAccessPattern(load->buffer, load->indices);
   }
+
+  BufferAccessMap buffer_access_map_;
+  DependencyMap dependency_map_;
 };
 
 class IndexTransformer : public StmtExprMutator {
  public:
-  explicit IndexTransformer(BufferAccessMap buffer_access_map, DependencyMap dependency_map)
-      : buffer_access_map_(std::move(buffer_access_map)),
-        dependency_map_(std::move(dependency_map)) {}
+  explicit IndexTransformer(AccessAndDependencyCollector collector)
+      : collector_(std::move(collector)) {}
 
  private:
   PrimExpr LowerIndices(SparseBuffer sp_buffer, const Array<PrimExpr>& indices) {
@@ -242,13 +252,13 @@ class IndexTransformer : public StmtExprMutator {
     CHECK(kind == SpIterKind::kSparseFixed || kind == SpIterKind::kSparseVariable);
     Axis iterated_axis = sp_iter->axis;
 
-    std::pair<SparseBuffer, int> dependent_pair = dependency_map_[GetRef<SpIterVar>(sp_iter)];
-    Array<SpIterVar> buffer_access_iters = buffer_access_map_[dependent_pair.first];
-    int n_dependent = dependent_pair.second;
+    SparseBuffer iterated_buffer{nullptr};
+    Array<PrimExpr> iters{nullptr};
 
-    Array<PrimExpr> iters{buffer_access_iters.begin(), buffer_access_iters.begin() + n_dependent};
+    collector_.GetIteratedBufferAndDependentIters(GetRef<SpIterVar>(sp_iter), &iterated_buffer,
+                                                  &iters);
     iters.push_back(GetRef<SpIterVar>(sp_iter));
-    PrimExpr lowered_indices = LowerIndices(dependent_pair.first, iters);
+    PrimExpr lowered_indices = LowerIndices(std::move(iterated_buffer), iters);
 
     if (kind == SpIterKind::kSparseFixed) {
       return BufferLoad(Downcast<SparseFixedAxis>(iterated_axis)->indices,
@@ -270,8 +280,7 @@ class IndexTransformer : public StmtExprMutator {
     return BufferStore(store->buffer->data, std::move(value), {std::move(lowered_indices)});
   }
 
-  BufferAccessMap buffer_access_map_;
-  DependencyMap dependency_map_;
+  AccessAndDependencyCollector collector_;
   arith::Analyzer ana_;
 };
 
@@ -279,10 +288,11 @@ PrimFunc LowerSparseTIR(PrimFunc f) {
   // Only apply this pass to TIR that is not from TE schedules
   if (!IsFromLegacyTESchedule(f)) {
     PrimFuncNode* fptr = f.CopyOnWrite();
+    // Step 1. Collect buffer access information and dependency.
     AccessAndDependencyCollector collector;
     collector.Collect(f->body);
-    fptr->body = IndexTransformer(collector.buffer_access_map_,
-                                  collector.dependency_map_)(std::move(f->body));
+    // Step 2. Lower indices.
+    fptr->body = IndexTransformer(collector)(std::move(f->body));
     return f;
   } else {
     return f;
