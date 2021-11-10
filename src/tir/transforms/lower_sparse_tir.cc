@@ -280,6 +280,81 @@ class IndexTransformer : public StmtExprMutator {
     return BufferStore(store->buffer->data, std::move(value), {std::move(lowered_indices)});
   }
 
+  Stmt VisitStmt_(const SparseBlockNode* sp_block) {
+    int n_iter = static_cast<int>(sp_block->sp_iter_vars.size());
+
+    // Step 1. Recursively mutate the `init` field and the block body.
+    Optional<Stmt> init =
+        sp_block->init.defined() ? VisitStmt(sp_block->init.value()) : Optional<Stmt>(NullOpt);
+    Stmt body = VisitStmt(sp_block->body);
+
+    // Step 2. Create the new outer loop vars.
+    Array<Var> loop_vars;
+    std::unordered_map<const VarNode*, PrimExpr> var_map;
+    loop_vars.reserve(n_iter);
+    var_map.reserve(n_iter);
+    for (const SpIterVar& sp_iter : sp_block->sp_iter_vars) {
+      Var loop_var("v_" + sp_iter->var->name_hint);
+      loop_vars.push_back(loop_var);
+      var_map[sp_iter->var.get()] = loop_var;
+    }
+
+    // Step 3. Create block iters and iter bindings.
+    Array<IterVar> block_iters;
+    Array<PrimExpr> iter_bindings;
+    block_iters.reserve(n_iter);
+    iter_bindings.reserve(n_iter);
+    for (int i = 0; i < n_iter; ++i) {
+      block_iters.push_back(SpIterVar2IterVar(sp_block->sp_iter_vars[i], var_map));
+      iter_bindings.push_back(loop_vars[i]);
+    }
+
+    // Step 4. Create the block and block-realize
+    // Todo: read/write regions
+    Block block(block_iters, {}, {}, sp_block->name, std::move(body), std::move(init));
+    BlockRealize block_realize(std::move(iter_bindings), const_true(), std::move(block));
+
+    // Step 5. Create outer loops and the block binding.
+    Stmt loop = GenerateLoops(std::move(block_realize), block_iters, loop_vars);
+
+    return loop;
+  }
+
+  IterVar SpIterVar2IterVar(const SpIterVar& sp_iter,
+                            const std::unordered_map<const VarNode*, PrimExpr>& var_map) {
+    PrimExpr extent{nullptr};
+
+    SpIterKind kind = sp_iter->kind;
+    if (kind == SpIterKind::kDenseFixed || kind == SpIterKind::kSparseFixed) {
+      extent = sp_iter->max_extent;
+    } else {
+      SparseBuffer iterated_buffer{nullptr};
+      Array<PrimExpr> dependent_iters{nullptr};
+      collector_.GetIteratedBufferAndDependentIters(sp_iter, &iterated_buffer, &dependent_iters);
+      PrimExpr lowered_indices = LowerIndices(std::move(iterated_buffer), dependent_iters);
+
+      Buffer indptr{kind == SpIterKind::kDenseVariable
+                        ? Downcast<DenseVariableAxis>(sp_iter->axis)->indptr
+                        : Downcast<SparseVariableAxis>(sp_iter->axis)->indptr};
+      PrimExpr l = BufferLoad(indptr, {lowered_indices});
+      PrimExpr r = BufferLoad(indptr, {add(lowered_indices, 1)});
+      extent = sub(r, l);
+    }
+
+    // Substitute the iteration vars in the expression with the loop vars.
+    return IterVar(Range::FromMinExtent(0, Substitute(std::move(extent), var_map)), sp_iter->var,
+                   sp_iter->is_reduction ? kCommReduce : kDataPar);
+  }
+
+  Stmt GenerateLoops(Stmt body, const Array<IterVar>& block_iters, const Array<Var>& loop_vars) {
+    int n_iter = static_cast<int>(block_iters.size());
+    for (int i = 0; i < n_iter; ++i) {
+      const Range& dom = block_iters[i]->dom;
+      body = For(loop_vars[i], dom->min, dom->extent, ForKind::kSerial, std::move(body));
+    }
+    return body;
+  }
+
   AccessAndDependencyCollector collector_;
   arith::Analyzer ana_;
 };
