@@ -67,7 +67,6 @@ class AccessAndDependencyCollector : public StmtExprVisitor {
       for (int k = 0; k < ndim; ++k) {
         const SpIterVar& sp_iter = kv_pair.second[k];
         if (sp_iter->kind == SpIterKind::kDenseFixed ||
-            sp_iter->kind == SpIterKind::kDenseVariable ||
             !BufferContainsAxis(buffer, sp_iter->axis)) {
           continue;
         }
