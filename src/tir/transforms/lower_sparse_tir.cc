@@ -246,9 +246,9 @@ class IndexTransformer : public StmtExprMutator {
     Array<SpIterVar> buffer_access_iters = buffer_access_map_[dependent_pair.first];
     int n_dependent = dependent_pair.second;
 
-    Array<PrimExpr> dependent_iters{buffer_access_iters.begin(),
-                                    buffer_access_iters.begin() + n_dependent};
-    PrimExpr lowered_indices = LowerIndices(dependent_pair.first, dependent_iters);
+    Array<PrimExpr> iters{buffer_access_iters.begin(), buffer_access_iters.begin() + n_dependent};
+    iters.push_back(GetRef<SpIterVar>(sp_iter));
+    PrimExpr lowered_indices = LowerIndices(dependent_pair.first, iters);
 
     if (kind == SpIterKind::kSparseFixed) {
       return BufferLoad(Downcast<SparseFixedAxis>(iterated_axis)->indices,
