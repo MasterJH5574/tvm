@@ -320,11 +320,13 @@ class IndexTransformer : public StmtExprMutator {
   }
 
   PrimExpr VisitExpr_(const SparseBufferLoadNode* load) final {
+    buffer_read_.insert(load->buffer.get());
     PrimExpr lowered_indices = LowerIndices(load->buffer, load->indices);
     return BufferLoad(load->buffer->data, {std::move(lowered_indices)});
   }
 
   Stmt VisitStmt_(const SparseBufferStoreNode* store) final {
+    buffer_write_.insert(store->buffer.get());
     PrimExpr value = ExprMutator::VisitExpr(store->value);
     PrimExpr lowered_indices = LowerIndices(store->buffer, store->indices);
     return BufferStore(store->buffer->data, std::move(value), {std::move(lowered_indices)});
@@ -332,6 +334,8 @@ class IndexTransformer : public StmtExprMutator {
 
   Stmt VisitStmt_(const SparseBlockNode* sp_block) {
     int n_iter = static_cast<int>(sp_block->sp_iter_vars.size());
+    buffer_read_.clear();
+    buffer_write_.clear();
 
     // Step 1. Recursively mutate the `init` field and the block body.
     Optional<Stmt> init =
@@ -359,12 +363,17 @@ class IndexTransformer : public StmtExprMutator {
       iter_bindings.push_back(loop_vars[i]);
     }
 
-    // Step 4. Create the block and block-realize
-    // Todo: read/write regions
-    Block block(block_iters, {}, {}, sp_block->name, std::move(body), std::move(init));
+    // Step 4. Generate the read-region and write-retion of the block.
+    Array<BufferRegion> reads{nullptr};
+    Array<BufferRegion> writes{nullptr};
+    GenerateReadWriteRegions(sp_block, &reads, &writes);
+
+    // Step 5. Create the block and block-realize
+    Block block(block_iters, std::move(reads), std::move(writes), sp_block->name, std::move(body),
+                std::move(init));
     BlockRealize block_realize(std::move(iter_bindings), const_true(), std::move(block));
 
-    // Step 5. Create outer loops and the block binding.
+    // Step 6. Create outer loops and the block binding.
     Stmt loop = GenerateLoops(std::move(block_realize), block_iters, loop_vars);
 
     return loop;
@@ -396,6 +405,27 @@ class IndexTransformer : public StmtExprMutator {
                    sp_iter->is_reduction ? kCommReduce : kDataPar);
   }
 
+  void GenerateReadWriteRegions(const SparseBlockNode* sp_block, Array<BufferRegion>* reads,
+                                Array<BufferRegion>* writes) {
+    for (const auto& it : sp_block->sp_struct2param_map) {
+      if (const auto* dv_axis = it.first.as<DenseVariableAxisNode>()) {
+        reads->push_back(BufferRegion::FullRegion(dv_axis->indptr));
+      } else if (const auto* sf_axis = it.first.as<SparseFixedAxisNode>()) {
+        reads->push_back(BufferRegion::FullRegion(sf_axis->indices));
+      } else if (const auto* sv_axis = it.first.as<SparseVariableAxisNode>()) {
+        reads->push_back(BufferRegion::FullRegion(sv_axis->indptr));
+        reads->push_back(BufferRegion::FullRegion(sv_axis->indices));
+      } else if (const auto* sp_buffer = it.first.as<SparseBufferNode>()) {
+        if (buffer_read_.count(sp_buffer)) {
+          reads->push_back(BufferRegion::FullRegion(sp_buffer->data));
+        }
+        if (buffer_write_.count(sp_buffer)) {
+          writes->push_back(BufferRegion::FullRegion(sp_buffer->data));
+        }
+      }
+    }
+  }
+
   Stmt GenerateLoops(Stmt body, const Array<IterVar>& block_iters, const Array<Var>& loop_vars) {
     int n_iter = static_cast<int>(block_iters.size());
     for (int i = 0; i < n_iter; ++i) {
@@ -407,6 +437,8 @@ class IndexTransformer : public StmtExprMutator {
 
   AccessAndDependencyCollector collector_;
   arith::Analyzer ana_;
+  std::unordered_set<const SparseBufferNode*> buffer_read_;
+  std::unordered_set<const SparseBufferNode*> buffer_write_;
 };
 
 Stmt WrapWithRootBlock(Stmt body) {
