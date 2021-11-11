@@ -428,7 +428,7 @@ class IndexTransformer : public StmtExprMutator {
 
   Stmt GenerateLoops(Stmt body, const Array<IterVar>& block_iters, const Array<Var>& loop_vars) {
     int n_iter = static_cast<int>(block_iters.size());
-    for (int i = 0; i < n_iter; ++i) {
+    for (int i = n_iter - 1; i >= 0; --i) {
       const Range& dom = block_iters[i]->dom;
       body = For(loop_vars[i], dom->min, dom->extent, ForKind::kSerial, std::move(body));
     }
