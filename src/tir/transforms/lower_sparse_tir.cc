@@ -33,6 +33,38 @@
 namespace tvm {
 namespace tir {
 
+Map<Var, Buffer> UpdateBufferMap(PrimFunc f) {
+  struct BufferMapUpdater : public StmtVisitor {
+    explicit BufferMapUpdater(Map<Var, Buffer> buffer_map) : buffer_map_(std::move(buffer_map)) {}
+
+    void VisitStmt_(const SparseBlockNode* sp_block) {
+      for (const auto& it : sp_block->sp_struct2param_map) {
+        if (const auto* dv_axis = it.first.as<DenseVariableAxisNode>()) {
+          ICHECK_EQ(it.second.size(), 1);
+          buffer_map_.Set(it.second[0], dv_axis->indptr);
+        } else if (const auto* sf_axis = it.first.as<SparseFixedAxisNode>()) {
+          ICHECK_EQ(it.second.size(), 1);
+          buffer_map_.Set(it.second[0], sf_axis->indices);
+        } else if (const auto* sv_axis = it.first.as<SparseVariableAxisNode>()) {
+          ICHECK_EQ(it.second.size(), 2);
+          buffer_map_.Set(it.second[0], sv_axis->indptr);
+          buffer_map_.Set(it.second[1], sv_axis->indices);
+        } else if (const auto* sp_buffer = it.first.as<SparseBufferNode>()) {
+          ICHECK_EQ(it.second.size(), 1);
+          buffer_map_.Set(it.second[0], sp_buffer->data);
+        }
+      }
+      return;
+    }
+
+    Map<Var, Buffer> buffer_map_;
+  };
+
+  BufferMapUpdater updater(f->buffer_map);
+  updater(f->body);
+  return std::move(updater.buffer_map_);
+}
+
 /*!
  * \brief Check whether a given SparseBuffer contains the given axis.
  * \brief buffer The SparseBuffer to be checked
@@ -362,10 +394,12 @@ PrimFunc LowerSparseTIR(PrimFunc f) {
   // Only apply this pass to TIR that is not from TE schedules
   if (!IsFromLegacyTESchedule(f)) {
     PrimFuncNode* fptr = f.CopyOnWrite();
-    // Step 1. Collect buffer access information and dependency.
+    // Step 1. Update the PrimFunc's buffer map.
+    fptr->buffer_map = UpdateBufferMap(f);
+    // Step 2. Collect buffer access information and dependency.
     AccessAndDependencyCollector collector;
     collector.Collect(f->body);
-    // Step 2. Lower indices.
+    // Step 3. Lower indices.
     fptr->body = IndexTransformer(collector)(std::move(f->body));
     return f;
   } else {
