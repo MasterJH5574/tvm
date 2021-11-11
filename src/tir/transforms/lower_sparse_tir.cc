@@ -116,8 +116,11 @@ class AccessAndDependencyCollector : public StmtExprVisitor {
     int n_dependent = dependent_pair.second;
 
     *iterated_buffer = std::move(dependent_pair.first);
-    *dependent_iters =
-        Array<PrimExpr>{buffer_access_iters.begin(), buffer_access_iters.begin() + n_dependent};
+    *dependent_iters = Array<PrimExpr>();
+    dependent_iters->reserve(n_dependent);
+    for (int i = 0; i < n_dependent; ++i) {
+      dependent_iters->push_back(buffer_access_iters[i]->var);
+    }
   }
 
   SpIterVar GetSpIterFromIndex(PrimExpr index) {
