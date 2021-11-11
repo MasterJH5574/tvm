@@ -103,8 +103,16 @@ class AccessAndDependencyCollector : public StmtExprVisitor {
           continue;
         }
 
-        ICHECK(dependency_map_.count(sp_iter) == 0);
-        dependency_map_[sp_iter] = std::make_pair(buffer, k);
+        auto it = dependency_map_.find(sp_iter);
+        if (it == dependency_map_.end()) {
+          dependency_map_[sp_iter] = std::make_pair(buffer, k);
+        } else {
+          const Array<SpIterVar>& dependent_iters = buffer_access_map_[it->second.first];
+          for (int i = 0; i < k; ++i) {
+            CHECK(kv_pair.second[i].same_as(dependent_iters[i]))
+                << "ValueError: A SpIterVar can only depend on a fixed set of iterators";
+          }
+        }
       }
     }
   }
@@ -226,11 +234,9 @@ class IndexTransformer : public StmtExprMutator {
         CHECK(!axis->IsInstance<DenseVariableAxisNode>());
         CHECK(sp_iter->axis.defined());
         const Axis& iterated_axis = sp_iter->axis;
-        if (const auto* df_axis = axis.as<DenseFixedAxisNode>()) {
-          CHECK(ana_.CanProveEqual(sp_iter->max_extent, df_axis->length));
+        if (axis->IsInstance<DenseFixedAxisNode>()) {
           sp_index = GetDenseValue(sp_iter);
         } else if (const auto* sf_axis = axis.as<SparseFixedAxisNode>()) {
-          CHECK(ana_.CanProveEqual(sp_iter->max_extent, sf_axis->length));
           if (iterated_axis.get() == sf_axis) {
             sp_index = sp_iter;
           } else {
@@ -238,7 +244,6 @@ class IndexTransformer : public StmtExprMutator {
                                    std::move(r));
           }
         } else if (const auto* sv_axis = axis.as<SparseVariableAxisNode>()) {
-          CHECK(ana_.CanProveEqual(sp_iter->max_extent, sv_axis->length));
           sp_index = lower_bound(sv_axis->indices->data, GetDenseValue(sp_iter), std::move(l),
                                  std::move(r));
         } else {
