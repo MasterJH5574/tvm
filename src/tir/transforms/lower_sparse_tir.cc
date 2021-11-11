@@ -120,6 +120,13 @@ class AccessAndDependencyCollector : public StmtExprVisitor {
         Array<PrimExpr>{buffer_access_iters.begin(), buffer_access_iters.begin() + n_dependent};
   }
 
+  SpIterVar GetSpIterFromIndex(PrimExpr index) {
+    auto it = var2sp_iter_map_.find(index.as<VarNode>());
+    CHECK(it != var2sp_iter_map_.end())
+        << "ValueError: Currently an index is only allowed to be SpIterVar";
+    return it->second;
+  }
+
  private:
   void AddAccessPattern(const SparseBuffer& buffer, const Array<PrimExpr>& indices) {
     int ndim = buffer->ndim();
@@ -128,9 +135,7 @@ class AccessAndDependencyCollector : public StmtExprVisitor {
     Array<SpIterVar> iters;
     iters.reserve(ndim);
     for (int i = 0; i < ndim; ++i) {
-      const SpIterVarNode* sp_iter = indices[i].as<SpIterVarNode>();
-      CHECK(sp_iter) << "ValueError: Currently an index is only allowed to be SpIterVar";
-      iters.push_back(GetRef<SpIterVar>(sp_iter));
+      iters.push_back(GetSpIterFromIndex(indices[i]));
     }
 
     BufferAccessMap::iterator it = buffer_access_map_.find(buffer);
@@ -145,6 +150,13 @@ class AccessAndDependencyCollector : public StmtExprVisitor {
     }
   }
 
+  void VisitStmt_(const SparseBlockNode* sp_block) final {
+    for (const SpIterVar& sp_iter : sp_block->sp_iter_vars) {
+      var2sp_iter_map_[sp_iter->var.get()] = sp_iter;
+    }
+    StmtVisitor::VisitStmt_(sp_block);
+  }
+
   void VisitStmt_(const SparseBufferStoreNode* store) final {
     ExprVisitor::VisitExpr(store->value);
     AddAccessPattern(store->buffer, store->indices);
@@ -156,6 +168,7 @@ class AccessAndDependencyCollector : public StmtExprVisitor {
 
   BufferAccessMap buffer_access_map_;
   DependencyMap dependency_map_;
+  std::unordered_map<const VarNode*, SpIterVar> var2sp_iter_map_;
 };
 
 class IndexTransformer : public StmtExprMutator {
@@ -176,9 +189,8 @@ class IndexTransformer : public StmtExprMutator {
       const PrimExpr& index = indices[i];
 
       // Stage 1. Get the sparse index.
-      const auto* sp_iter = index.as<SpIterVarNode>();
+      SpIterVar sp_iter = collector_.GetSpIterFromIndex(index);
       PrimExpr sp_index{nullptr};
-      CHECK(sp_iter) << "ValueError: Currently an index is only allowed to be SpIterVar";
 
       PrimExpr l = AccumulateLowerIndex(lowered_index, sp_buffer, i, 0);
       PrimExpr r = AccumulateLowerIndex(add(lowered_index, 1), sp_buffer, i, 0);
@@ -188,7 +200,7 @@ class IndexTransformer : public StmtExprMutator {
         CHECK(!axis->IsInstance<DenseVariableAxisNode>());
         if (const auto* df_axis = axis.as<DenseFixedAxisNode>()) {
           CHECK(ana_.CanProveEqual(sp_iter->max_extent, df_axis->length));
-          sp_index = GetRef<SpIterVar>(sp_iter);
+          sp_index = sp_iter;
         } else {
           Var buffer_var;
           if (const auto* sf_axis = axis.as<SparseFixedAxisNode>()) {
@@ -206,7 +218,7 @@ class IndexTransformer : public StmtExprMutator {
         const auto* dv_axis = axis.as<DenseVariableAxisNode>();
         CHECK(dv_axis != nullptr);
         CHECK(sp_iter->axis.defined());
-        sp_index = GetRef<SpIterVar>(sp_iter);
+        sp_index = sp_iter;
       } else if (kind == SpIterKind::kSparseFixed) {
         CHECK(!axis->IsInstance<DenseVariableAxisNode>());
         CHECK(sp_iter->axis.defined());
@@ -217,7 +229,7 @@ class IndexTransformer : public StmtExprMutator {
         } else if (const auto* sf_axis = axis.as<SparseFixedAxisNode>()) {
           CHECK(ana_.CanProveEqual(sp_iter->max_extent, sf_axis->length));
           if (iterated_axis.get() == sf_axis) {
-            sp_index = GetRef<SpIterVar>(sp_iter);
+            sp_index = sp_iter;
           } else {
             sp_index = lower_bound(sf_axis->indices->data, GetDenseValue(sp_iter), std::move(l),
                                    std::move(r));
@@ -244,7 +256,7 @@ class IndexTransformer : public StmtExprMutator {
         } else if (const auto* sv_axis = axis.as<SparseVariableAxisNode>()) {
           CHECK(ana_.CanProveEqual(sp_iter->max_extent, sv_axis->length));
           if (iterated_axis.get() == sv_axis) {
-            sp_index = GetRef<SpIterVar>(sp_iter);
+            sp_index = sp_iter;
           } else {
             sp_index = lower_bound(sv_axis->indices->data, GetDenseValue(sp_iter), std::move(l),
                                    std::move(r));
@@ -278,7 +290,7 @@ class IndexTransformer : public StmtExprMutator {
     throw;
   }
 
-  PrimExpr GetDenseValue(const SpIterVarNode* sp_iter) {
+  PrimExpr GetDenseValue(SpIterVar sp_iter) {
     SpIterKind kind = sp_iter->kind;
     CHECK(kind == SpIterKind::kSparseFixed || kind == SpIterKind::kSparseVariable);
     Axis iterated_axis = sp_iter->axis;
@@ -286,9 +298,8 @@ class IndexTransformer : public StmtExprMutator {
     SparseBuffer iterated_buffer{nullptr};
     Array<PrimExpr> iters{nullptr};
 
-    collector_.GetIteratedBufferAndDependentIters(GetRef<SpIterVar>(sp_iter), &iterated_buffer,
-                                                  &iters);
-    iters.push_back(GetRef<SpIterVar>(sp_iter));
+    collector_.GetIteratedBufferAndDependentIters(sp_iter, &iterated_buffer, &iters);
+    iters.push_back(sp_iter);
     PrimExpr lowered_indices = LowerIndices(std::move(iterated_buffer), iters);
 
     if (kind == SpIterKind::kSparseFixed) {
