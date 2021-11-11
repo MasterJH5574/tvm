@@ -390,6 +390,12 @@ class IndexTransformer : public StmtExprMutator {
   arith::Analyzer ana_;
 };
 
+Stmt WrapWithRootBlock(Stmt body) {
+  Block root_block({}, {}, {}, "root", std::move(body));
+  body = BlockRealize({}, const_true(), std::move(root_block));
+  return Stmt(body);
+}
+
 PrimFunc LowerSparseTIR(PrimFunc f) {
   // Only apply this pass to TIR that is not from TE schedules
   if (!IsFromLegacyTESchedule(f)) {
@@ -401,6 +407,8 @@ PrimFunc LowerSparseTIR(PrimFunc f) {
     collector.Collect(f->body);
     // Step 3. Lower indices.
     fptr->body = IndexTransformer(collector)(std::move(f->body));
+    // Step 4. Wrap the function body with a root block.
+    fptr->body = WrapWithRootBlock(std::move(fptr->body));
     return f;
   } else {
     return f;
