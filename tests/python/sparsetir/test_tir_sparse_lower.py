@@ -21,11 +21,17 @@ from tvm.script import tir as T
 
 
 @T.prim_func
-def csrmm(a: T.handle, b: T.handle, c: T.handle, indptr: T.handle, indices: T.handle) -> None:
-    n = T.var("int32")
-    m = T.var("int32")
-    k = T.var("int32")
-    nnz = T.var("int32")
+def csrmm(
+    a: T.handle,
+    b: T.handle,
+    c: T.handle,
+    indptr: T.handle,
+    indices: T.handle,
+    n: T.int32,
+    m: T.int32,
+    k: T.int32,
+    nnz: T.int32,
+) -> None:
     I = T.dense_fixed(n)
     J = T.sparse_variable((m, n + 1, nnz), (indptr, indices), "int32")
     K = T.dense_fixed(k)
@@ -39,10 +45,15 @@ def csrmm(a: T.handle, b: T.handle, c: T.handle, indptr: T.handle, indices: T.ha
 
 
 @T.prim_func
-def csr_reduce(a: T.handle, b: T.handle, indptr: T.handle, indices: T.handle) -> None:
-    n = T.var("int32")
-    m = T.var("int32")
-    nnz = T.var("int32")
+def csr_reduce(
+    a: T.handle,
+    b: T.handle,
+    indptr: T.handle,
+    indices: T.handle,
+    n: T.int32,
+    m: T.int32,
+    nnz: T.int32,
+) -> None:
     I = T.dense_fixed(n)
     J = T.sparse_variable((m, n + 1, nnz), (indptr, indices), "int32")
     A = T.match_sparse_buffer(a, (I, J), nnz, "float32")
@@ -54,12 +65,18 @@ def csr_reduce(a: T.handle, b: T.handle, indptr: T.handle, indices: T.handle) ->
 
 
 @T.prim_func
-def bsrmm(a: T.handle, b: T.handle, c: T.handle, indptr: T.handle, indices: T.handle) -> None:
-    nb = T.var("int32")
-    mb = T.var("int32")
-    nnzb = T.var("int32")
-    blk = T.var("int32")
-    feat_size = T.var("int32")
+def bsrmm(
+    a: T.handle,
+    b: T.handle,
+    c: T.handle,
+    indptr: T.handle,
+    indices: T.handle,
+    nb: T.int32,
+    mb: T.int32,
+    nnzb: T.int32,
+    blk: T.int32,
+    feat_size: T.int32,
+) -> None:
     I = T.dense_fixed(nb)
     J = T.sparse_variable((mb, nb + 1, nnzb), (indptr, indices), "int32")
     BI = T.dense_fixed(blk)
@@ -82,13 +99,18 @@ def bsrmm(a: T.handle, b: T.handle, c: T.handle, indptr: T.handle, indices: T.ha
 
 
 @T.prim_func
-def ellpack_mm(a: T.handle, b: T.handle, c: T.handle, indices: T.handle) -> None:
-    nb = T.var("int32")
-    mb = T.var("int32")
-    feat_size = T.var("int32")
-    nnz = T.var("int32")
-    col = T.var("int32")
-    blk = T.var("int32")
+def ellpack_mm(
+    a: T.handle,
+    b: T.handle,
+    c: T.handle,
+    indices: T.handle,
+    nb: T.int32,
+    mb: T.int32,
+    feat_size: T.int32,
+    nnz: T.int32,
+    col: T.int32,
+    blk: T.int32,
+) -> None:
     I = T.dense_fixed(nb)
     J = T.sparse_fixed((mb, nnz, col), indices, "int32")
     F = T.dense_fixed(feat_size)
@@ -120,17 +142,16 @@ def batch_mm(
     j_b_indptr: T.handle,
     k_b_indptr: T.handle,
     k_c_indptr: T.handle,
-):
-    batch = T.var("int32")
-    n_max = T.var("int32")
-    m_max = T.var("int32")
-    k_max = T.var("int32")
-    nnz_ac1 = T.var("int32")
-    nnz_b1 = T.var("int32")
-    nnz_a2 = T.var("int32")
-    nnz_b2 = T.var("int32")
-    nnz_c2 = T.var("int32")
-
+    batch: T.int32,
+    n_max: T.int32,
+    m_max: T.int32,
+    k_max: T.int32,
+    nnz_ac1: T.int32,
+    nnz_b1: T.int32,
+    nnz_a2: T.int32,
+    nnz_b2: T.int32,
+    nnz_c2: T.int32,
+) -> None:
     Batch = T.dense_fixed(batch)
     I = T.dense_variable((n_max, batch + 1), i_indptr, "int32")
     J_a = T.dense_variable((m_max, nnz_ac1 + 1), j_a_indptr, "int32")
@@ -153,10 +174,15 @@ def batch_mm(
 
 
 @T.prim_func
-def csr_element_wise(a: T.handle, b: T.handle, indptr: T.handle, indices: T.handle):
-    m = T.var("int32")
-    n = T.var("int32")
-    nnz = T.var("int32")
+def csr_element_wise(
+    a: T.handle,
+    b: T.handle,
+    indptr: T.handle,
+    indices: T.handle,
+    m: T.int32,
+    n: T.int32,
+    nnz: T.int32,
+) -> None:
     I = T.dense_fixed(m)
     J = T.sparse_variable((n, m + 1, nnz), (indptr, indices), "int32")
     A = T.match_sparse_buffer(a, (I, J), nnz, "float32")
