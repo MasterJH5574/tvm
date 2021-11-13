@@ -50,6 +50,45 @@ def csrmm(
 
 
 @T.prim_func
+def lowered_csrmm(
+    a: T.handle,
+    b: T.handle,
+    c: T.handle,
+    indptr: T.handle,
+    indices: T.handle,
+    n: T.int32,
+    m: T.int32,
+    k: T.int32,
+    nnz: T.int32,
+) -> None:
+    A_data = T.match_buffer(a, [nnz], dtype="float32")
+    B_data = T.match_buffer(b, [m * k], dtype="float32")
+    C_data = T.match_buffer(c, [n * k], dtype="float32")
+    J_indptr = T.match_buffer(indptr, [n + 1], dtype="int32")
+    J_indices = T.match_buffer(indices, [nnz], dtype="int32")
+    for v_vi in T.serial(0, n):
+        for v_vj, v_vk in T.grid(J_indptr[v_vi + 1] - J_indptr[v_vi], k):
+            with T.block("csrmm"):
+                vi, vj, vk = T.axis.remap("SRS", [v_vi, v_vj, v_vk])
+                T.reads(
+                    [
+                        C_data[0 : n * k],
+                        J_indptr[0 : n + 1],
+                        J_indices[0:nnz],
+                        B_data[0 : m * k],
+                        A_data[0:nnz],
+                    ]
+                )
+                T.writes([C_data[0 : n * k]])
+                with T.init():
+                    C_data[vi * k + vk] = T.float32(0)
+                C_data[vi * k + vk] = (
+                    C_data[vi * k + vk]
+                    + A_data[J_indptr[vi] + vj] * B_data[J_indices[J_indptr[vi] + vj] * k + vk]
+                )
+
+
+@T.prim_func
 def csr_reduce(
     a: T.handle,
     b: T.handle,
@@ -67,6 +106,31 @@ def csr_reduce(
         with T.init():
             B[vi] = 0.0
         B[vi] = B[vi] + A[vi, vj]
+
+
+@T.prim_func
+def lowered_csr_reduce(
+    a: T.handle,
+    b: T.handle,
+    indptr: T.handle,
+    indices: T.handle,
+    n: T.int32,
+    m: T.int32,
+    nnz: T.int32,
+) -> None:
+    A_data = T.match_buffer(a, [nnz], dtype="float32")
+    B_data = T.match_buffer(b, [n], dtype="float32")
+    J_indptr = T.match_buffer(indptr, [n + 1], dtype="int32")
+    J_indices = T.match_buffer(indices, [nnz], dtype="int32")
+    for v_vi in T.serial(0, n):
+        for v_vj in T.serial(0, J_indptr[v_vi + 1] - J_indptr[v_vi]):
+            with T.block("csr_reduce"):
+                vi, vj = T.axis.remap("SR", [v_vi, v_vj])
+                T.reads([B_data[0:n], A_data[0:nnz], J_indptr[0 : n + 1], J_indices[0:nnz]])
+                T.writes([B_data[0:n]])
+                with T.init():
+                    B_data[vi] = T.float32(0)
+                B_data[vi] = B_data[vi] + A_data[J_indptr[vi] + vj]
 
 
 @T.prim_func
@@ -104,6 +168,49 @@ def bsrmm(
 
 
 @T.prim_func
+def lowered_bsrmm(
+    a: T.handle,
+    b: T.handle,
+    c: T.handle,
+    indptr: T.handle,
+    indices: T.handle,
+    nb: T.int32,
+    mb: T.int32,
+    nnzb: T.int32,
+    blk: T.int32,
+    feat_size: T.int32,
+) -> None:
+    A_data = T.match_buffer(a, [nnzb * blk * blk], dtype="float32")
+    B_data = T.match_buffer(b, [mb * blk * feat_size], dtype="float32")
+    C_data = T.match_buffer(c, [nb * blk * feat_size], dtype="float32")
+    J_indptr = T.match_buffer(indptr, [nb + 1], dtype="int32")
+    J_indices = T.match_buffer(indices, [nnzb], dtype="int32")
+    for v_vi in T.serial(0, nb):
+        for v_vj, v_vbi, v_vbj, v_vf in T.grid(
+            J_indptr[v_vi + 1] - J_indptr[v_vi], blk, blk, feat_size
+        ):
+            with T.block("bsrmm"):
+                vi, vj, vbi, vbj, vf = T.axis.remap("SRSRS", [v_vi, v_vj, v_vbi, v_vbj, v_vf])
+                T.reads(
+                    [
+                        A_data[0 : nnzb * blk * blk],
+                        J_indptr[0 : nb + 1],
+                        J_indices[0:nnzb],
+                        C_data[0 : nb * blk * feat_size],
+                        B_data[0 : mb * blk * feat_size],
+                    ]
+                )
+                T.writes([C_data[0 : nb * blk * feat_size]])
+                with T.init():
+                    C_data[(vi * blk + vbi) * feat_size + vf] = T.float32(0)
+                C_data[(vi * blk + vbi) * feat_size + vf] = (
+                    C_data[(vi * blk + vbi) * feat_size + vf]
+                    + A_data[((J_indptr[vi] + vj) * blk + vbi) * blk + vbj]
+                    * B_data[(J_indices[J_indptr[vi] + vj] * blk + vbj) * feat_size + vf]
+                )
+
+
+@T.prim_func
 def ellpack_mm(
     a: T.handle,
     b: T.handle,
@@ -135,6 +242,44 @@ def ellpack_mm(
         with T.init():
             C[vi, vbi, vf] = 0.0
         C[vi, vbi, vf] = C[vi, vbi, vf] + A[vi, vj, vbi, vbj] * B[vj, vbj, vf]
+
+
+@T.prim_func
+def lowered_ellpack_mm(
+    a: T.handle,
+    b: T.handle,
+    c: T.handle,
+    indices: T.handle,
+    nb: T.int32,
+    mb: T.int32,
+    feat_size: T.int32,
+    nnz: T.int32,
+    col: T.int32,
+    blk: T.int32,
+) -> None:
+    A_data = T.match_buffer(a, [nnz * blk * blk], dtype="float32")
+    B_data = T.match_buffer(b, [mb * blk * feat_size], dtype="float32")
+    C_data = T.match_buffer(c, [nb * blk * feat_size], dtype="float32")
+    J_indices = T.match_buffer(indices, [nnz], dtype="int32")
+    for v_vi, v_vj, v_vbi, v_vbj, v_vf in T.grid(nb, col, blk, blk, feat_size):
+        with T.block("bsrmm"):
+            vi, vj, vbi, vbj, vf = T.axis.remap("SRSRS", [v_vi, v_vj, v_vbi, v_vbj, v_vf])
+            T.reads(
+                [
+                    A_data[0 : nnz * blk * blk],
+                    J_indices[0:nnz],
+                    B_data[0 : mb * blk * feat_size],
+                    C_data[0 : nb * blk * feat_size],
+                ]
+            )
+            T.writes([C_data[0 : nb * blk * feat_size]])
+            with T.init():
+                C_data[(vi * blk + vbi) * feat_size + vf] = T.float32(0)
+            C_data[(vi * blk + vbi) * feat_size + vf] = (
+                C_data[(vi * blk + vbi) * feat_size + vf]
+                + A_data[((vi * col + vj) * blk + vbi) * blk + vbj]
+                * B_data[(J_indices[vi * col + vj] * blk + vbj) * feat_size + vf]
+            )
 
 
 @T.prim_func
@@ -197,9 +342,33 @@ def csr_element_wise(
         B[vi, vj] = A[vi, vj] * 2.5
 
 
+@T.prim_func
+def lowered_csr_element_wise(
+    a: T.handle,
+    b: T.handle,
+    indptr: T.handle,
+    indices: T.handle,
+    m: T.int32,
+    n: T.int32,
+    nnz: T.int32,
+) -> None:
+    A_data = T.match_buffer(a, [nnz], dtype="float32")
+    B_data = T.match_buffer(b, [nnz], dtype="float32")
+    J_indptr = T.match_buffer(indptr, [m + 1], dtype="int32")
+    J_indices = T.match_buffer(indices, [nnz], dtype="int32")
+    for v_vi in T.serial(0, m):
+        for v_vj in T.serial(0, J_indptr[v_vi + 1] - J_indptr[v_vi]):
+            with T.block("csr_element_wise"):
+                vi, vj = T.axis.remap("SS", [v_vi, v_vj])
+                T.reads([J_indptr[0 : m + 1], J_indices[0:nnz], A_data[0:nnz]])
+                T.writes([B_data[0:nnz]])
+                B_data[J_indptr[vi] + vj] = A_data[J_indptr[vi] + vj] * T.float32(2.5)
+
+
 def test_csrmm():
     mod = tvm.IRModule.from_expr(csrmm)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
+    tvm.ir.assert_structural_equal(mod["main"], lowered_csrmm, True)
 
     A = sp.random(512, 512, dtype="float32", density=0.0125, format="csr")
     x = np.random.rand(512, 128).astype("float32")
@@ -222,6 +391,7 @@ def test_csrmm():
 def test_csr_reduce():
     mod = tvm.IRModule.from_expr(csr_reduce)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
+    tvm.ir.assert_structural_equal(mod["main"], lowered_csr_reduce, True)
 
     A = sp.random(128, 128, dtype="float32", density=0.0125, format="csr")
     b_ground_truth = np.array(np.sum(A, axis=1))
@@ -242,6 +412,7 @@ def test_csr_reduce():
 def test_bsrmm():
     mod = tvm.IRModule.from_expr(bsrmm)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
+    tvm.ir.assert_structural_equal(mod["main"], lowered_bsrmm, True)
 
     block_size = 16
     nb = 32
@@ -281,6 +452,7 @@ def test_bsrmm():
 def test_ellpack_mm():
     mod = tvm.IRModule.from_expr(ellpack_mm)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
+    tvm.ir.assert_structural_equal(mod["main"], lowered_ellpack_mm, True)
 
     nnz_cols = 4
     nb = 64
@@ -335,6 +507,7 @@ def test_batch_mm():
 def test_csr_element_wise():
     mod = tvm.IRModule.from_expr(csr_element_wise)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
+    tvm.ir.assert_structural_equal(mod["main"], lowered_csr_element_wise, True)
 
     A = sp.random(128, 128, dtype="float32", density=0.0125, format="csr")
     b_ground_truth = A * 2.5
