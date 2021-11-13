@@ -14,9 +14,14 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+from os import replace
+from numpy.core.fromnumeric import size
+from scipy.sparse import bsr
 import tvm
+import tvm.testing
 import tvm.tir as tir
-import tvm.te as te
+import scipy.sparse as sp
+import numpy as np
 from tvm.script import tir as T
 
 
@@ -86,7 +91,7 @@ def bsrmm(
     B = T.match_sparse_buffer(b, (T.to_dense(J), BJ, F), mb * blk * feat_size, "float32")
     C = T.match_sparse_buffer(c, (I, BI, F), nb * blk * feat_size, "float32")
 
-    with T.iter([T.cord(I), T.pos(J), T.cord(BI), T.cord(BJ), T.cord(F)], "SRSSS", "bsrmm") as [
+    with T.iter([T.cord(I), T.pos(J), T.cord(BI), T.cord(BJ), T.cord(F)], "SRSRS", "bsrmm") as [
         vi,
         vj,
         vbi,
@@ -120,7 +125,7 @@ def ellpack_mm(
     B = T.match_sparse_buffer(b, (T.to_dense(J), BJ, F), mb * blk * feat_size, "float32")
     C = T.match_sparse_buffer(c, (I, BI, F), nb * blk * feat_size, "float32")
 
-    with T.iter([T.cord(I), T.pos(J), T.cord(BI), T.cord(BJ), T.cord(F)], "SRSSS", "bsrmm") as [
+    with T.iter([T.cord(I), T.pos(J), T.cord(BI), T.cord(BJ), T.cord(F)], "SRSRS", "bsrmm") as [
         vi,
         vj,
         vbi,
@@ -195,37 +200,156 @@ def csr_element_wise(
 def test_csrmm():
     mod = tvm.IRModule.from_expr(csrmm)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    print(mod["main"].script(tir_prefix="T"))
+
+    A = sp.random(512, 512, dtype="float32", density=0.0125, format="csr")
+    x = np.random.rand(512, 128).astype("float32")
+    y_ground_truth = A * x
+    y = np.zeros((512, 128)).astype("float32")
+
+    n, m, k, nnz = mod["main"].params[-4:]
+    f = tvm.build(mod["main"].specialize({n: 512, m: 512, k: 128, nnz: A.nnz}), target="llvm")
+
+    ctx = tvm.cpu(0)
+    A_indptr = tvm.nd.array(A.indptr.astype("int32"), device=ctx)
+    A_indices = tvm.nd.array(A.indices.astype("int32"), device=ctx)
+    A_data = tvm.nd.array(A.data.astype("float32"), device=ctx)
+    X_nd = tvm.nd.array(x.reshape(-1), device=ctx)
+    Y_nd = tvm.nd.array(y.reshape(-1), device=ctx)
+    f(A_data, X_nd, Y_nd, A_indptr, A_indices)
+    tvm.testing.assert_allclose(y_ground_truth.reshape(-1), Y_nd.numpy(), rtol=1e-5, atol=1e-5)
 
 
 def test_csr_reduce():
     mod = tvm.IRModule.from_expr(csr_reduce)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    print(mod["main"].script(tir_prefix="T"))
+
+    A = sp.random(128, 128, dtype="float32", density=0.0125, format="csr")
+    b_ground_truth = np.array(np.sum(A, axis=1))
+    b = np.zeros((128,)).astype("float32")
+
+    n, m, nnz = csr_reduce.params[-3:]
+    f = tvm.build(mod["main"].specialize({n: 128, m: 128, nnz: A.nnz}), target="llvm")
+
+    ctx = tvm.cpu(0)
+    A_indptr = tvm.nd.array(A.indptr.astype("int32"), device=ctx)
+    A_indices = tvm.nd.array(A.indices.astype("int32"), device=ctx)
+    A_data = tvm.nd.array(A.data.astype("float32"), device=ctx)
+    B_nd = tvm.nd.array(b, device=ctx)
+    f(A_data, B_nd, A_indptr, A_indices)
+    tvm.testing.assert_allclose(b_ground_truth.reshape(-1), B_nd.numpy(), rtol=1e-5, atol=1e-5)
 
 
 def test_bsrmm():
     mod = tvm.IRModule.from_expr(bsrmm)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    print(mod["main"].script(tir_prefix="T"))
+
+    block_size = 16
+    nb = 32
+    mb = 32
+    feat_size = 256
+    n = nb * block_size
+    m = mb * block_size
+
+    A_block = sp.random(mb, nb, dtype="float32", density=0.05, format="csr")
+    indptr = A_block.indptr
+    indices = A_block.indices
+    nnzb = A_block.nnz
+    data = np.random.rand(nnzb, block_size, block_size)
+    A = sp.bsr_matrix((data, indices, indptr), shape=(n, m))
+    x = np.random.rand(m, feat_size).astype("float32")
+    y_ground_truth = A * x
+    y = np.zeros((n * feat_size,)).astype("float32")
+
+    v_nb, v_mb, v_nnzb, v_blk, v_feat_size = bsrmm.params[-5:]
+    f = tvm.build(
+        mod["main"].specialize(
+            {v_nb: nb, v_mb: mb, v_nnzb: nnzb, v_blk: block_size, v_feat_size: feat_size}
+        ),
+        target="llvm",
+    )
+
+    ctx = tvm.cpu(0)
+    A_indptr = tvm.nd.array(indptr.astype("int32"), device=ctx)
+    A_indices = tvm.nd.array(indices.astype("int32"), device=ctx)
+    A_data = tvm.nd.array(data.reshape(-1).astype("float32"), device=ctx)
+    X_nd = tvm.nd.array(x.reshape(-1), device=ctx)
+    Y_nd = tvm.nd.array(y, device=ctx)
+    f(A_data, X_nd, Y_nd, A_indptr, A_indices)
+    tvm.testing.assert_allclose(y_ground_truth.reshape(-1), Y_nd.numpy(), rtol=1e-5, atol=1e-5)
 
 
 def test_ellpack_mm():
     mod = tvm.IRModule.from_expr(ellpack_mm)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    print(mod["main"].script(tir_prefix="T"))
+
+    nnz_cols = 4
+    nb = 64
+    mb = 64
+    feat_size = 1024
+    nnz = nb * nnz_cols
+    block_size = 16
+    n = nb * block_size
+    m = mb * block_size
+
+    rng = np.random.default_rng()
+    indptr = np.arange(0, (nb + 1) * nnz_cols, nnz_cols)
+    indices = np.array([rng.choice(mb, size=nnz_cols, replace=False) for i in range(nb)])
+    order = indices.argsort(axis=1)
+    indices = np.array([indices[i, order[i]] for i in range(0, nb)]).reshape(-1)
+    data = np.random.rand(nnz, block_size, block_size)
+    A = sp.bsr_matrix((data, indices, indptr), shape=(n, m))
+    x = np.random.rand(m, feat_size).astype("float32")
+    y_ground_truth = A * x
+    y = np.zeros((n * feat_size,)).astype("float32")
+
+    v_nb, v_mb, v_feat_size, v_nnz, v_col, v_blk = ellpack_mm.params[-6:]
+    f = tvm.build(
+        mod["main"].specialize(
+            {
+                v_nb: nb,
+                v_mb: mb,
+                v_feat_size: feat_size,
+                v_nnz: nnz,
+                v_col: nnz_cols,
+                v_blk: block_size,
+            }
+        ),
+        target="llvm",
+    )
+
+    ctx = tvm.cpu(0)
+    A_indices = tvm.nd.array(indices.astype("int32"), device=ctx)
+    A_data = tvm.nd.array(data.reshape(-1).astype("float32"), device=ctx)
+    X_nd = tvm.nd.array(x.reshape(-1), device=ctx)
+    Y_nd = tvm.nd.array(y, device=ctx)
+    f(A_data, X_nd, Y_nd, A_indices)
+    tvm.testing.assert_allclose(y_ground_truth.reshape(-1), Y_nd.numpy(), rtol=1e-5, atol=1e-5)
 
 
 def test_batch_mm():
     mod = tvm.IRModule.from_expr(batch_mm)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    print(mod["main"].script(tir_prefix="T"))
+    # print(mod["main"].script(tir_prefix="T"))
 
 
 def test_csr_element_wise():
     mod = tvm.IRModule.from_expr(csr_element_wise)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    print(mod["main"].script(tir_prefix="T"))
+
+    A = sp.random(128, 128, dtype="float32", density=0.0125, format="csr")
+    b_ground_truth = A * 2.5
+    b = np.zeros((A.nnz,)).astype("float32")
+
+    m, n, nnz = csr_element_wise.params[-3:]
+    f = tvm.build(mod["main"].specialize({m: 128, n: 128, nnz: A.nnz}), target="llvm")
+
+    ctx = tvm.cpu(0)
+    A_indptr = tvm.nd.array(A.indptr.astype("int32"), device=ctx)
+    A_indices = tvm.nd.array(A.indices.astype("int32"), device=ctx)
+    A_data = tvm.nd.array(A.data.astype("float32"), device=ctx)
+    B_nd = tvm.nd.array(b, device=ctx)
+    f(A_data, B_nd, A_indptr, A_indices)
+    tvm.testing.assert_allclose(b_ground_truth.data.reshape(-1), B_nd.numpy(), rtol=1e-5, atol=1e-5)
 
 
 if __name__ == "__main__":
