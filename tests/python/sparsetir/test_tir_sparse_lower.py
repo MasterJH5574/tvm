@@ -189,7 +189,7 @@ def csr_element_wise(
     B = T.match_sparse_buffer(b, (I, J), nnz, "float32")
 
     with T.iter([T.cord(I), T.pos(J)], "SS", "csr_element_wise") as [vi, vj]:
-        B[vi, vj] = A[vi, vj] * 2.0 + 1.0
+        B[vi, vj] = A[vi, vj] * 2.5
 
 
 def test_csrmm():
