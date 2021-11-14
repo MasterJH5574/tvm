@@ -409,15 +409,15 @@ class IndexTransformer : public StmtExprMutator {
 
   void GenerateReadWriteRegions(const SparseBlockNode* sp_block, Array<BufferRegion>* reads,
                                 Array<BufferRegion>* writes) {
-    for (const auto& it : sp_block->sp_struct2param_map) {
-      if (const auto* dv_axis = it.first.as<DenseVariableAxisNode>()) {
+    for (const ObjectRef& obj : sp_block->sp_structs) {
+      if (const auto* dv_axis = obj.as<DenseVariableAxisNode>()) {
         reads->push_back(BufferRegion::FullRegion(dv_axis->indptr));
-      } else if (const auto* sf_axis = it.first.as<SparseFixedAxisNode>()) {
+      } else if (const auto* sf_axis = obj.as<SparseFixedAxisNode>()) {
         reads->push_back(BufferRegion::FullRegion(sf_axis->indices));
-      } else if (const auto* sv_axis = it.first.as<SparseVariableAxisNode>()) {
+      } else if (const auto* sv_axis = obj.as<SparseVariableAxisNode>()) {
         reads->push_back(BufferRegion::FullRegion(sv_axis->indptr));
         reads->push_back(BufferRegion::FullRegion(sv_axis->indices));
-      } else if (const auto* sp_buffer = it.first.as<SparseBufferNode>()) {
+      } else if (const auto* sp_buffer = obj.as<SparseBufferNode>()) {
         if (buffer_read_.count(sp_buffer)) {
           reads->push_back(BufferRegion::FullRegion(sp_buffer->data));
         }

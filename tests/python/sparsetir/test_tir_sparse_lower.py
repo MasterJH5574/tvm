@@ -72,11 +72,11 @@ def lowered_csrmm(
                 vi, vj, vk = T.axis.remap("SRS", [v_vi, v_vj, v_vk])
                 T.reads(
                     [
-                        C_data[0 : n * k],
                         J_indptr[0 : n + 1],
                         J_indices[0:nnz],
-                        B_data[0 : m * k],
                         A_data[0:nnz],
+                        B_data[0 : m * k],
+                        C_data[0 : n * k],
                     ]
                 )
                 T.writes([C_data[0 : n * k]])
@@ -126,7 +126,7 @@ def lowered_csr_reduce(
         for v_vj in T.serial(0, J_indptr[v_vi + 1] - J_indptr[v_vi]):
             with T.block("csr_reduce"):
                 vi, vj = T.axis.remap("SR", [v_vi, v_vj])
-                T.reads([B_data[0:n], A_data[0:nnz], J_indptr[0 : n + 1], J_indices[0:nnz]])
+                T.reads([J_indptr[0 : n + 1], J_indices[0:nnz], A_data[0:nnz], B_data[0:n]])
                 T.writes([B_data[0:n]])
                 with T.init():
                     B_data[vi] = T.float32(0)
@@ -193,11 +193,11 @@ def lowered_bsrmm(
                 vi, vj, vbi, vbj, vf = T.axis.remap("SRSRS", [v_vi, v_vj, v_vbi, v_vbj, v_vf])
                 T.reads(
                     [
-                        A_data[0 : nnzb * blk * blk],
                         J_indptr[0 : nb + 1],
                         J_indices[0:nnzb],
-                        C_data[0 : nb * blk * feat_size],
+                        A_data[0 : nnzb * blk * blk],
                         B_data[0 : mb * blk * feat_size],
+                        C_data[0 : nb * blk * feat_size],
                     ]
                 )
                 T.writes([C_data[0 : nb * blk * feat_size]])
@@ -266,8 +266,8 @@ def lowered_ellpack_mm(
             vi, vj, vbi, vbj, vf = T.axis.remap("SRSRS", [v_vi, v_vj, v_vbi, v_vbj, v_vf])
             T.reads(
                 [
-                    A_data[0 : nnz * blk * blk],
                     J_indices[0:nnz],
+                    A_data[0 : nnz * blk * blk],
                     B_data[0 : mb * blk * feat_size],
                     C_data[0 : nb * blk * feat_size],
                 ]
