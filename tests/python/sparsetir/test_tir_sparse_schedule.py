@@ -365,27 +365,12 @@ def lowered_csr_element_wise(
                 B_data[J_indptr[vi] + vj] = A_data[J_indptr[vi] + vj] * T.float32(2.5)
 
 
-def test_csrmm():
+def test_get_sparse_block():
     sch = tir.Schedule(csrmm, debug_mask="all")
-    mod = tvm.tir.transform.LowerSparseTIR()(sch.mod["main"])
-    tvm.ir.assert_structural_equal(mod["main"], lowered_csrmm, True)
-
-    A = sp.random(512, 512, dtype="float32", density=0.0125, format="csr")
-    x = np.random.rand(512, 128).astype("float32")
-    y_ground_truth = A * x
-    y = np.zeros((512, 128)).astype("float32")
-
-    n, m, k, nnz = mod["main"].params[-4:]
-    f = tvm.build(mod["main"].specialize({n: 512, m: 512, k: 128, nnz: A.nnz}), target="llvm")
-
-    ctx = tvm.cpu(0)
-    A_indptr = tvm.nd.array(A.indptr.astype("int32"), device=ctx)
-    A_indices = tvm.nd.array(A.indices.astype("int32"), device=ctx)
-    A_data = tvm.nd.array(A.data.astype("float32"), device=ctx)
-    X_nd = tvm.nd.array(x.reshape(-1), device=ctx)
-    Y_nd = tvm.nd.array(y.reshape(-1), device=ctx)
-    f(A_data, X_nd, Y_nd, A_indptr, A_indices)
-    tvm.testing.assert_allclose(y_ground_truth.reshape(-1), Y_nd.numpy(), rtol=1e-5, atol=1e-5)
+    block_rv = sch.get_sparse_block("csrmm")
+    block = sch.get(block_rv)
+    assert block.name == "csrmm"
+    assert block.same_as(csrmm.body)
 
 
 def test_csr_reduce():
@@ -526,9 +511,9 @@ def test_csr_element_wise():
 
 
 if __name__ == "__main__":
-    test_csrmm()
-    test_csr_reduce()
-    test_bsrmm()
-    test_ellpack_mm()
-    test_batch_mm()
-    test_csr_element_wise()
+    test_get_sparse_block()
+    # test_csr_reduce()
+    # test_bsrmm()
+    # test_ellpack_mm()
+    # test_batch_mm()
+    # test_csr_element_wise()

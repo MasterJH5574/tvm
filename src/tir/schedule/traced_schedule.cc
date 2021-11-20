@@ -344,5 +344,14 @@ void TracedScheduleNode::EnterPostproc() {
                                       /*outputs=*/{}));
 }
 
+/******** Schedule: SparseTIR schedules ********/
+SparseBlockRV TracedScheduleNode::GetSparseBlock(const String& name, const String& func_name) {
+  SparseBlockRV result = ConcreteScheduleNode::GetSparseBlock(name, func_name);
+
+  // Do not support traced schedule so far.
+
+  return result;
+}
+
 }  // namespace tir
 }  // namespace tvm

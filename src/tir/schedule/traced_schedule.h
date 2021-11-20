@@ -88,6 +88,8 @@ class TracedScheduleNode : public ConcreteScheduleNode {
   /******** Schedule: Annotation ********/
   /******** Schedule: Misc ********/
   void EnterPostproc() final;
+  /******** Schedule: SparseTIR schedules ********/
+  SparseBlockRV GetSparseBlock(const String& name, const String& func_name = "main") final;
 };
 
 }  // namespace tir

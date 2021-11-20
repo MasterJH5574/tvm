@@ -485,6 +485,15 @@ class ScheduleNode : public runtime::Object {
   /******** Schedule: Misc ********/
   /*! \brief A no-op that marks the start of postprocessing phase of scheduling */
   virtual void EnterPostproc() = 0;
+  /******** Schedule: SparseTIR schedules ********/
+  /*!
+   * \brief Retrieve a sparse block in a specific function with its name
+   * \param name The name of the sparse block to be retrieved
+   * \param func_name The name of the function
+   * \return The sparse block retrieved
+   * \note Indexing error is raised if 0 or multiple blocks exist with the specific name
+   */
+  virtual SparseBlockRV GetSparseBlock(const String& name, const String& func_name = "main") = 0;
 };
 
 /*!

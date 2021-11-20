@@ -21,7 +21,7 @@ from tvm._ffi import register_object as _register_object
 from tvm.error import TVMError, register_error
 from tvm.ir import IRModule, PrimExpr
 from tvm.runtime import Object
-from tvm.tir import Block, For, IntImm, PrimFunc
+from tvm.tir import Block, For, IntImm, PrimFunc, SparseBlock
 
 from . import _ffi_api
 from .state import ScheduleState, StmtSRef, _parse_debug_mask, _parse_mod
@@ -1649,3 +1649,31 @@ class Schedule(Object):
     def enter_postproc(self) -> None:
         """A no-op that marks the start of postprocessing phase of scheduling"""
         _ffi_api.ScheduleEnterPostproc(self)  # type: ignore # pylint: disable=no-member
+
+    ########## Schedule: SparseTIR schedules ##########
+
+    def get_sparse_block(
+        self,
+        name: str,
+        func_name: str = "main",
+    ) -> SparseBlock:
+        """Retrieve a sparse block in a specific function with its name
+
+        Parameters
+        ----------
+        name : str
+            The name of the sparse block
+        func_name : str = "main"
+            The name of the function
+
+        Returns
+        -------
+        block : SparseBlockRV
+            The sparse block retrieved
+            IndexError is raised if 0 or multiple blocks exist with the specific name.
+        """
+        return _ffi_api.ScheduleGetSparseBlock(  # type: ignore # pylint: disable=no-member
+            self,
+            name,
+            func_name,
+        )

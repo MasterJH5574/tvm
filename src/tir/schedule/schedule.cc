@@ -195,6 +195,9 @@ TVM_REGISTER_GLOBAL("tir.schedule.ScheduleStorageAlign")
 /******** (FFI) Misc ********/
 TVM_REGISTER_GLOBAL("tir.schedule.ScheduleEnterPostproc")
     .set_body_method<Schedule>(&ScheduleNode::EnterPostproc);
+/******** (FFI) SparseTIR schedules ********/
+TVM_REGISTER_GLOBAL("tir.schedule.ScheduleGetSparseBlock")
+    .set_body_method<Schedule>(&ScheduleNode::GetSparseBlock);
 
 }  // namespace tir
 }  // namespace tvm

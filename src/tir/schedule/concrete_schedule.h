@@ -124,6 +124,8 @@ class ConcreteScheduleNode : public ScheduleNode {
   /******** Schedule: Annotation ********/
   /******** Schedule: Misc ********/
   void EnterPostproc() override {}
+  /******** Schedule: SparseTIR schedules ********/
+  SparseBlockRV GetSparseBlock(const String& name, const String& func_name = "main") override;
 
  protected:
   /******** Utility functions ********/
