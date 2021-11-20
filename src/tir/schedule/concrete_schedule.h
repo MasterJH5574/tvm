@@ -126,6 +126,7 @@ class ConcreteScheduleNode : public ScheduleNode {
   void EnterPostproc() override {}
   /******** Schedule: SparseTIR schedules ********/
   SparseBlockRV GetSparseBlock(const String& name, const String& func_name = "main") override;
+  void SparseReorder(const SparseBlockRV& block_rv, const Array<SpIterVar>& new_order) override;
 
  protected:
   /******** Utility functions ********/
@@ -165,11 +166,16 @@ class ConcreteScheduleNode : public ScheduleNode {
   inline Array<ExprRV> CreateRV(const std::vector<int64_t>& value);
   /*!
    * \brief Add a sparse block as a random variable into the symbol table
-   *
    * \param sp_block
    * \return SparseBlockRV
    */
   inline SparseBlockRV CreateRV(const SparseBlock& sp_block);
+  /*!
+   * \brief Update the value of the input SparseBlockRV to the input block.
+   * \param sp_block_rv The random variable to be updated
+   * \param block The new value of the random variable
+   */
+  inline void UpdateRV(const SparseBlockRV& sp_block_rv, const SparseBlock& block);
   /*! \brief Remove a random variable from the symbol table */
   inline void RemoveFromSymbolTable(const ObjectRef& rv);
 };
@@ -310,6 +316,10 @@ inline SparseBlockRV ConcreteScheduleNode::CreateRV(const SparseBlock& block) {
   SparseBlockRV rv;
   this->symbol_table_.Set(rv, block);
   return rv;
+}
+
+inline void ConcreteScheduleNode::UpdateRV(const SparseBlockRV& rv, const SparseBlock& block) {
+  this->symbol_table_.Set(rv, block);
 }
 
 inline void ConcreteScheduleNode::RemoveFromSymbolTable(const ObjectRef& obj) {

@@ -353,5 +353,12 @@ SparseBlockRV TracedScheduleNode::GetSparseBlock(const String& name, const Strin
   return result;
 }
 
+void TracedScheduleNode::SparseReorder(const SparseBlockRV& block_rv,
+                                       const Array<SpIterVar>& new_order) {
+  ConcreteScheduleNode::SparseReorder(block_rv, new_order);
+
+  // Do not support traced schedule so far.
+}
+
 }  // namespace tir
 }  // namespace tvm

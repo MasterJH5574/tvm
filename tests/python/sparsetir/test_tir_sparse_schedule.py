@@ -17,6 +17,7 @@
 from os import replace
 from numpy.core.fromnumeric import size
 from scipy.sparse import bsr
+import pytest
 import tvm
 import tvm.testing
 import tvm.tir as tir
@@ -365,6 +366,40 @@ def lowered_csr_element_wise(
                 B_data[J_indptr[vi] + vj] = A_data[J_indptr[vi] + vj] * T.float32(2.5)
 
 
+@T.prim_func
+def reordered_bsrmm(
+    a: T.handle,
+    b: T.handle,
+    c: T.handle,
+    indptr: T.handle,
+    indices: T.handle,
+    nb: T.int32,
+    mb: T.int32,
+    nnzb: T.int32,
+    blk: T.int32,
+    feat_size: T.int32,
+) -> None:
+    I = T.dense_fixed(nb)
+    J = T.sparse_variable((mb, nb + 1, nnzb), (indptr, indices), "int32")
+    BI = T.dense_fixed(blk)
+    BJ = T.dense_fixed(blk)
+    F = T.dense_fixed(feat_size)
+    A = T.match_sparse_buffer(a, (I, J, BI, BJ), nnzb * blk * blk, "float32")
+    B = T.match_sparse_buffer(b, (T.to_dense(J), BJ, F), mb * blk * feat_size, "float32")
+    C = T.match_sparse_buffer(c, (I, BI, F), nb * blk * feat_size, "float32")
+    # body
+    with T.iter([T.cord(BI), T.cord(BJ), T.cord(I), T.pos(J), T.cord(F)], "SRSRS", "bsrmm") as [
+        vbi,
+        vbj,
+        vi,
+        vj,
+        vf,
+    ]:
+        with T.init():
+            C[vi, vbi, vf] = T.float32(0)
+        C[vi, vbi, vf] = C[vi, vbi, vf] + A[vi, vj, vbi, vbj] * B[vj, vbj, vf]
+
+
 def test_get_sparse_block():
     sch = tir.Schedule(csrmm, debug_mask="all")
     block_rv = sch.get_sparse_block("csrmm")
@@ -373,147 +408,35 @@ def test_get_sparse_block():
     assert block.same_as(csrmm.body)
 
 
-def test_csr_reduce():
-    mod = tvm.IRModule.from_expr(csr_reduce)
-    mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    tvm.ir.assert_structural_equal(mod["main"], lowered_csr_reduce, True)
-
-    A = sp.random(128, 128, dtype="float32", density=0.0125, format="csr")
-    b_ground_truth = np.array(np.sum(A, axis=1))
-    b = np.zeros((128,)).astype("float32")
-
-    n, m, nnz = csr_reduce.params[-3:]
-    f = tvm.build(mod["main"].specialize({n: 128, m: 128, nnz: A.nnz}), target="llvm")
-
-    ctx = tvm.cpu(0)
-    A_indptr = tvm.nd.array(A.indptr.astype("int32"), device=ctx)
-    A_indices = tvm.nd.array(A.indices.astype("int32"), device=ctx)
-    A_data = tvm.nd.array(A.data.astype("float32"), device=ctx)
-    B_nd = tvm.nd.array(b, device=ctx)
-    f(A_data, B_nd, A_indptr, A_indices)
-    tvm.testing.assert_allclose(b_ground_truth.reshape(-1), B_nd.numpy(), rtol=1e-5, atol=1e-5)
+def test_reorder():
+    sch = tir.Schedule(bsrmm, debug_mask="all")
+    block_rv = sch.get_sparse_block("bsrmm")
+    block = sch.get(block_rv)
+    i, j, bi, bj, f = block.sp_iter_vars
+    sch.sparse_reorder(block_rv, [bi, bj, i, j, f])
+    tvm.ir.assert_structural_equal(sch.mod["main"], reordered_bsrmm, True)
 
 
-def test_bsrmm():
-    mod = tvm.IRModule.from_expr(bsrmm)
-    mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    tvm.ir.assert_structural_equal(mod["main"], lowered_bsrmm, True)
-
-    block_size = 16
-    nb = 32
-    mb = 32
-    feat_size = 256
-    n = nb * block_size
-    m = mb * block_size
-
-    A_block = sp.random(mb, nb, dtype="float32", density=0.05, format="csr")
-    indptr = A_block.indptr
-    indices = A_block.indices
-    nnzb = A_block.nnz
-    data = np.random.rand(nnzb, block_size, block_size)
-    A = sp.bsr_matrix((data, indices, indptr), shape=(n, m))
-    x = np.random.rand(m, feat_size).astype("float32")
-    y_ground_truth = A * x
-    y = np.zeros((n * feat_size,)).astype("float32")
-
-    v_nb, v_mb, v_nnzb, v_blk, v_feat_size = bsrmm.params[-5:]
-    f = tvm.build(
-        mod["main"].specialize(
-            {v_nb: nb, v_mb: mb, v_nnzb: nnzb, v_blk: block_size, v_feat_size: feat_size}
-        ),
-        target="llvm",
-    )
-
-    ctx = tvm.cpu(0)
-    A_indptr = tvm.nd.array(indptr.astype("int32"), device=ctx)
-    A_indices = tvm.nd.array(indices.astype("int32"), device=ctx)
-    A_data = tvm.nd.array(data.reshape(-1).astype("float32"), device=ctx)
-    X_nd = tvm.nd.array(x.reshape(-1), device=ctx)
-    Y_nd = tvm.nd.array(y, device=ctx)
-    f(A_data, X_nd, Y_nd, A_indptr, A_indices)
-    tvm.testing.assert_allclose(y_ground_truth.reshape(-1), Y_nd.numpy(), rtol=1e-5, atol=1e-5)
+def test_reorder_fail_on_dependency():
+    sch = tir.Schedule(bsrmm, debug_mask="all")
+    block_rv = sch.get_sparse_block("bsrmm")
+    block = sch.get(block_rv)
+    i, j, bi, bj, f = block.sp_iter_vars
+    with pytest.raises(tvm.tir.ScheduleError):
+        sch.sparse_reorder(block_rv, [bi, bj, j, i, f])
 
 
-def test_ellpack_mm():
-    mod = tvm.IRModule.from_expr(ellpack_mm)
-    mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    tvm.ir.assert_structural_equal(mod["main"], lowered_ellpack_mm, True)
-
-    nnz_cols = 4
-    nb = 64
-    mb = 64
-    feat_size = 1024
-    nnz = nb * nnz_cols
-    block_size = 16
-    n = nb * block_size
-    m = mb * block_size
-
-    rng = np.random.default_rng()
-    indptr = np.arange(0, (nb + 1) * nnz_cols, nnz_cols)
-    indices = np.array([rng.choice(mb, size=nnz_cols, replace=False) for i in range(nb)])
-    order = indices.argsort(axis=1)
-    indices = np.array([indices[i, order[i]] for i in range(0, nb)]).reshape(-1)
-    data = np.random.rand(nnz, block_size, block_size)
-    A = sp.bsr_matrix((data, indices, indptr), shape=(n, m))
-    x = np.random.rand(m, feat_size).astype("float32")
-    y_ground_truth = A * x
-    y = np.zeros((n * feat_size,)).astype("float32")
-
-    v_nb, v_mb, v_feat_size, v_nnz, v_col, v_blk = ellpack_mm.params[-6:]
-    f = tvm.build(
-        mod["main"].specialize(
-            {
-                v_nb: nb,
-                v_mb: mb,
-                v_feat_size: feat_size,
-                v_nnz: nnz,
-                v_col: nnz_cols,
-                v_blk: block_size,
-            }
-        ),
-        target="llvm",
-    )
-
-    ctx = tvm.cpu(0)
-    A_indices = tvm.nd.array(indices.astype("int32"), device=ctx)
-    A_data = tvm.nd.array(data.reshape(-1).astype("float32"), device=ctx)
-    X_nd = tvm.nd.array(x.reshape(-1), device=ctx)
-    Y_nd = tvm.nd.array(y, device=ctx)
-    f(A_data, X_nd, Y_nd, A_indices)
-    tvm.testing.assert_allclose(y_ground_truth.reshape(-1), Y_nd.numpy(), rtol=1e-5, atol=1e-5)
-
-
-def test_batch_mm():
-    mod = tvm.IRModule.from_expr(batch_mm)
-    mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    # print(mod["main"].script(tir_prefix="T"))
-
-
-def test_csr_element_wise():
-    mod = tvm.IRModule.from_expr(csr_element_wise)
-    mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    tvm.ir.assert_structural_equal(mod["main"], lowered_csr_element_wise, True)
-
-    A = sp.random(128, 128, dtype="float32", density=0.0125, format="csr")
-    b_ground_truth = A * 2.5
-    b = np.zeros((A.nnz,)).astype("float32")
-
-    m, n, nnz = csr_element_wise.params[-3:]
-    f = tvm.build(mod["main"].specialize({m: 128, n: 128, nnz: A.nnz}), target="llvm")
-
-    ctx = tvm.cpu(0)
-    A_indptr = tvm.nd.array(A.indptr.astype("int32"), device=ctx)
-    A_indices = tvm.nd.array(A.indices.astype("int32"), device=ctx)
-    A_data = tvm.nd.array(A.data.astype("float32"), device=ctx)
-    B_nd = tvm.nd.array(b, device=ctx)
-    f(A_data, B_nd, A_indptr, A_indices)
-    tvm.testing.assert_allclose(b_ground_truth.data.reshape(-1), B_nd.numpy(), rtol=1e-5, atol=1e-5)
+def test_reorder_fail_on_new_order_length():
+    sch = tir.Schedule(bsrmm, debug_mask="all")
+    block_rv = sch.get_sparse_block("bsrmm")
+    block = sch.get(block_rv)
+    i, j, bi, bj, f = block.sp_iter_vars
+    with pytest.raises(tvm.tir.ScheduleError):
+        sch.sparse_reorder(block_rv, [bi, bj, i, j])
 
 
 if __name__ == "__main__":
     test_get_sparse_block()
-    # test_csr_reduce()
-    # test_bsrmm()
-    # test_ellpack_mm()
-    # test_batch_mm()
-    # test_csr_element_wise()
+    test_reorder()
+    test_reorder_fail_on_dependency()
+    test_reorder_fail_on_new_order_length()

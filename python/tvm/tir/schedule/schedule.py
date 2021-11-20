@@ -22,6 +22,7 @@ from tvm.error import TVMError, register_error
 from tvm.ir import IRModule, PrimExpr
 from tvm.runtime import Object
 from tvm.tir import Block, For, IntImm, PrimFunc, SparseBlock
+from tvm.tir.sparse import SpIterVar
 
 from . import _ffi_api
 from .state import ScheduleState, StmtSRef, _parse_debug_mask, _parse_mod
@@ -1676,4 +1677,23 @@ class Schedule(Object):
             self,
             name,
             func_name,
+        )
+
+    def sparse_reorder(self, block: SparseBlockRV, new_order: List[SpIterVar]) -> None:
+        """Reorder a list of sparse iterators. It requires the new order to not break the iterator
+        dependency.
+
+        Parameters
+        ----------
+        block : SparseBlockRV
+            The queried sparse block
+
+        new_order : List[SpIterVar]
+            The The new order of the sparse iterators, whose length should equal to the number
+            of the input block's sparse iterators
+        """
+        return _ffi_api.ScheduleSparseReorder(  # type: ignore # pylint: disable=no-member
+            self,
+            block,
+            new_order,
         )

@@ -601,5 +601,15 @@ SparseBlockRV ConcreteScheduleNode::GetSparseBlock(const String& name, const Str
   return CreateRV(GetRef<SparseBlock>(block));
 }
 
+void ConcreteScheduleNode::SparseReorder(const SparseBlockRV& block_rv,
+                                         const Array<SpIterVar>& new_order) {
+  SparseBlock old_block = this->Get(block_rv);
+  SparseBlock new_block{nullptr};
+  TVM_TIR_SCHEDULE_BEGIN();
+  new_block = tir::SparseReorder(state_, old_block, new_order);
+  TVM_TIR_SCHEDULE_END("sparse-reorder", this->error_render_level_);
+  this->UpdateRV(block_rv, new_block);
+}
+
 }  // namespace tir
 }  // namespace tvm
