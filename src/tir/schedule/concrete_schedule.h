@@ -70,6 +70,7 @@ class ConcreteScheduleNode : public ScheduleNode {
   inline Block Get(const BlockRV& block_rv) const final;
   inline For Get(const LoopRV& loop_rv) const final;
   inline PrimExpr Get(const ExprRV& expr_rv) const final;
+  inline SparseBlock Get(const SparseBlockRV& sp_block_rv) const final;
   inline StmtSRef GetSRef(const BlockRV& block_rv) const final;
   inline StmtSRef GetSRef(const LoopRV& loop_rv) const final;
   inline Array<StmtSRef> GetSRefs(const Array<BlockRV>& rvs) const;
@@ -77,6 +78,7 @@ class ConcreteScheduleNode : public ScheduleNode {
   void RemoveRV(const BlockRV& block_rv) final { RemoveFromSymbolTable(block_rv); }
   void RemoveRV(const LoopRV& loop_rv) final { RemoveFromSymbolTable(loop_rv); }
   void RemoveRV(const ExprRV& expr_rv) final { RemoveFromSymbolTable(expr_rv); }
+  void RemoveRV(const SparseBlockRV& sp_block_rv) final { RemoveFromSymbolTable(sp_block_rv); }
   using ScheduleNode::GetSRef;
 
  public:
@@ -159,6 +161,13 @@ class ConcreteScheduleNode : public ScheduleNode {
    * \return The new random variables created
    */
   inline Array<ExprRV> CreateRV(const std::vector<int64_t>& value);
+  /*!
+   * \brief Add a sparse block as a random variable into the symbol table
+   *
+   * \param sp_block
+   * \return SparseBlockRV
+   */
+  inline SparseBlockRV CreateRV(const SparseBlock& sp_block);
   /*! \brief Remove a random variable from the symbol table */
   inline void RemoveFromSymbolTable(const ObjectRef& rv);
 };
@@ -190,6 +199,13 @@ inline PrimExpr ConcreteScheduleNode::Get(const ExprRV& expr_rv) const {
     return Integer(int_imm->value);
   });
   return this->analyzer_->Simplify(transformed);
+}
+
+inline SparseBlock ConcreteScheduleNode::Get(const SparseBlockRV& sp_block_rv) const {
+  auto it = this->symbol_table_.find(sp_block_rv);
+  CHECK(it != this->symbol_table_.end())
+      << "IndexError: Cannot find corresponding SparseBlockRV: " << sp_block_rv;
+  return Downcast<SparseBlock>((*it).second);
 }
 
 inline StmtSRef ConcreteScheduleNode::GetSRef(const BlockRV& block_rv) const {
@@ -286,6 +302,12 @@ inline Array<ExprRV> ConcreteScheduleNode::CreateRV(const std::vector<int64_t>& 
     results.push_back(CreateRV(v));
   }
   return results;
+}
+
+inline SparseBlockRV ConcreteScheduleNode::CreateRV(const SparseBlock& block) {
+  SparseBlockRV rv;
+  this->symbol_table_.Set(rv, block);
+  return rv;
 }
 
 inline void ConcreteScheduleNode::RemoveFromSymbolTable(const ObjectRef& obj) {
