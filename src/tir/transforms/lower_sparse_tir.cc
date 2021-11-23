@@ -308,8 +308,10 @@ class IndexTransformer : public StmtExprMutator {
     GenerateReadWriteRegions(sp_block, &reads, &writes);
 
     // Step 5. Create the block and block-realize
+    Map<String, ObjectRef> mapping;
+    mapping.Set("sparse", Bool(true));
     Block block(block_iters, std::move(reads), std::move(writes), sp_block->name, std::move(body),
-                std::move(init));
+                std::move(init), {}, {}, std::move(mapping));
     BlockRealize block_realize(std::move(iter_bindings), const_true(), std::move(block));
 
     // Step 6. Create outer loops and the block binding.

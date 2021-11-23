@@ -163,12 +163,17 @@ Definition of a scope that is a stage pipeline:
           !IsReductionBlock(self, block_sref, scope_root_sref)) {
         const BlockNode* block = TVM_SREF_TO_BLOCK(block, block_sref);
         // NOTE(Zihao): check if the block has atomic attribute.
-        auto&& it = block->annotations.find("atomic");
+        auto&& it_atomic = block->annotations.find("atomic");
         bool is_atomic = false;
-        if (it != block->annotations.end()) {
-          is_atomic = ((*it).second).as<IntImmNode>()->value;
+        if (it_atomic != block->annotations.end()) {
+          is_atomic = ((*it_atomic).second).as<IntImmNode>()->value;
         }
-        if (!is_atomic) {
+        auto&& it_sparse = block->annotations.find("sparse");
+        bool is_sparse = false;
+        if (it_sparse != block->annotations.end()) {
+          is_sparse = ((*it_sparse).second).as<IntImmNode>()->value;
+        } 
+        if (!is_sparse && !is_atomic) {
           throw NotCompactDataFlowError(self->mod, GetRef<Stmt>(scope_root_subtree->stmt),
                                         GetRef<Block>(block));
         }

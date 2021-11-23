@@ -31,6 +31,7 @@ def csrmm(a: T.handle, b: T.handle, c: T.handle, indptr: T.handle, indices: T.ha
     B = T.match_sparse_buffer(b, (T.to_dense(J), K), n * k, "float32")
     C = T.match_sparse_buffer(c, (I, K), m * k, "float32")
     with T.iter([T.cord(I), T.cord(J), T.cord(K)], "SRS", "csrmm") as [vi, vj, vk]:
+        T.block_attr({"sparse": True})
         with T.init():
             C[vi, vk] = 0.0
         C[vi, vk] = C[vi, vk] + A[vi, vj] * B[vj, vk]
@@ -51,6 +52,7 @@ def csrmm_tir(a: T.handle, b: T.handle, c: T.handle, indptr: T.handle, indices: 
                 C[vi * K + vk] = 0.
             for j in T.serial(0, A_indptr[vi + 1] - A_indptr[vi]):
                 with T.block("spmm_inner"):
+                    T.block_attr({"sparse": True})
                     vj = T.axis.R(NNZ, j + A_indptr[vi])
                     C[vi * K + vk] = C[vi * K + vk] + \
                         A_data[vj] * B[A_indices[vj] * K + vk]
@@ -71,6 +73,7 @@ def bsrmm_tir(a: T.handle, b: T.handle, c: T.handle, indptr: T.handle, indices: 
                 C[(vio * BLOCK_SIZE + vii) * K + vk] = 0.
             for jo in T.serial(0, A_indptr[vio + 1] - A_indptr[vio]):
                 with T.block("spmm_inner"):
+                    T.block_attr({"sparse": True})
                     vjo = T.axis.R(NNZB, jo + A_indptr[vio])
                     C[(vio * BLOCK_SIZE + vii) * K + vk] = C[(vio * BLOCK_SIZE + vii) * K + vk] + A_data[(
                         vjo * BLOCK_SIZE + vii) * BLOCK_SIZE + vji] * B[(A_indices[vjo] * BLOCK_SIZE + vji) * K + vk]
@@ -85,6 +88,7 @@ def ellmm_tir(a: T.handle, b: T.handle, c: T.handle, indices: T.handle, M: T.int
     A_indices = T.match_buffer(indices, (M * NNZ_COLS,), "int32")
     for i, j, k in T.grid(M, NNZ_COLS, K):
         with T.block("spmm"):
+            T.block_attr({"sparse": True})
             vi, vj, vk = T.axis.remap("SRS", [i, j, k])
             with T.init():
                 C[vi * K + vk] = 0.
@@ -102,6 +106,7 @@ def sddmm_tir(a: T.handle, b: T.handle, c: T.handle, indptr: T.handle, indices: 
     C_indices = T.match_buffer(indices, (NNZ,), "int32")
     for ij, k in T.grid(NNZ, K):
         with T.block("sddmm"):
+            T.block_attr({"sparse": True})
             vij, vk = T.axis.remap("SR", [ij, k])
             T.reads([A[0: M * K], B[0: N * K], C_data[vij], C_indices[vij], C_indptr[0: M + 1]])
             T.writes([C_data[vij]])
@@ -262,10 +267,10 @@ def test_sddmm():
     )
     blk = sch.get_block("sddmm")
     ij, k = sch.get_loops(blk)
-    #sch.decompose_reduction(blk, ij)
+    # TODO(zihao): fix the behavior in the future.
+    # sch.decompose_reduction(blk, ij)
     sch.bind(ij, "blockIdx.x")
-    ko, ki = sch.split(k, [None, 1])
-    sch.bind(ki, "threadIdx.x")
+    sch.bind(k, "threadIdx.x")
 
     # convert numpy tensor to tvm ndarray
     C_indices = tvm.nd.array(indices.astype("int32"), device=tvm.cuda(0))
@@ -276,6 +281,7 @@ def test_sddmm():
 
     # build function
     f = tvm.build(sch.mod['main'], target="cuda")
+    # print(f.imported_modules[0].get_source())
     f(X_nd, Y_nd, C_data, C_indptr, C_indices)
 
     # assertion

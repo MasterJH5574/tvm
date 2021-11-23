@@ -69,6 +69,7 @@ def lowered_csrmm(
     for v_vi in T.serial(0, n):
         for v_vj, v_vk in T.grid(J_indptr[v_vi + 1] - J_indptr[v_vi], k):
             with T.block("csrmm"):
+                T.block_attr({"sparse": True})
                 vi, vj, vk = T.axis.remap("SRS", [v_vi, v_vj, v_vk])
                 T.reads(
                     [
@@ -125,6 +126,7 @@ def lowered_csr_reduce(
     for v_vi in T.serial(0, n):
         for v_vj in T.serial(0, J_indptr[v_vi + 1] - J_indptr[v_vi]):
             with T.block("csr_reduce"):
+                T.block_attr({"sparse": True})
                 vi, vj = T.axis.remap("SR", [v_vi, v_vj])
                 T.reads([J_indptr[0 : n + 1], J_indices[0:nnz], A_data[0:nnz], B_data[0:n]])
                 T.writes([B_data[0:n]])
@@ -190,6 +192,7 @@ def lowered_bsrmm(
             J_indptr[v_vi + 1] - J_indptr[v_vi], blk, blk, feat_size
         ):
             with T.block("bsrmm"):
+                T.block_attr({"sparse": True})
                 vi, vj, vbi, vbj, vf = T.axis.remap("SRSRS", [v_vi, v_vj, v_vbi, v_vbj, v_vf])
                 T.reads(
                     [
@@ -263,6 +266,7 @@ def lowered_ellpack_mm(
     J_indices = T.match_buffer(indices, [nnz], dtype="int32")
     for v_vi, v_vj, v_vbi, v_vbj, v_vf in T.grid(nb, col, blk, blk, feat_size):
         with T.block("bsrmm"):
+            T.block_attr({"sparse": True})
             vi, vj, vbi, vbj, vf = T.axis.remap("SRSRS", [v_vi, v_vj, v_vbi, v_vbj, v_vf])
             T.reads(
                 [
@@ -359,6 +363,7 @@ def lowered_csr_element_wise(
     for v_vi in T.serial(0, m):
         for v_vj in T.serial(0, J_indptr[v_vi + 1] - J_indptr[v_vi]):
             with T.block("csr_element_wise"):
+                T.block_attr({"sparse": True})
                 vi, vj = T.axis.remap("SS", [v_vi, v_vj])
                 T.reads([J_indptr[0 : m + 1], J_indices[0:nnz], A_data[0:nnz]])
                 T.writes([B_data[0:nnz]])
