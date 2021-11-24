@@ -168,12 +168,7 @@ Definition of a scope that is a stage pipeline:
         if (it_atomic != block->annotations.end()) {
           is_atomic = ((*it_atomic).second).as<IntImmNode>()->value;
         }
-        auto&& it_sparse = block->annotations.find("sparse");
-        bool is_sparse = false;
-        if (it_sparse != block->annotations.end()) {
-          is_sparse = ((*it_sparse).second).as<IntImmNode>()->value;
-        } 
-        if (!is_sparse && !is_atomic) {
+        if (!is_atomic) {
           throw NotCompactDataFlowError(self->mod, GetRef<Stmt>(scope_root_subtree->stmt),
                                         GetRef<Block>(block));
         }
@@ -445,6 +440,12 @@ void CheckNotOutputBlock(const ScheduleState& self, const StmtSRef& block_sref,
 
 bool IsAffineBinding(const BlockRealize& realize, const Map<Var, Range>& loop_var_ranges,
                      arith::Analyzer* analyzer) {
+  // (SparseTIR Hack) Always return true for sparse blocks.
+  Optional<ObjectRef> sparse_attr = realize->block->annotations.Get("sparse");
+  if (sparse_attr.defined() && sparse_attr.as<IntImmNode>()->value == 1) {
+    return true;
+  }
+
   if (loop_var_ranges.empty()) {
     return true;
   }

@@ -267,10 +267,9 @@ def test_sddmm():
     )
     blk = sch.get_block("sddmm")
     ij, k = sch.get_loops(blk)
-    # TODO(zihao): fix the behavior in the future.
-    # sch.decompose_reduction(blk, ij)
     sch.bind(ij, "blockIdx.x")
     sch.bind(k, "threadIdx.x")
+    sch.decompose_reduction(blk, k)
 
     # convert numpy tensor to tvm ndarray
     C_indices = tvm.nd.array(indices.astype("int32"), device=tvm.cuda(0))
