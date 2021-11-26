@@ -47,6 +47,8 @@ class AxisNode : public Object {
   String GetName() const { return name; }
   PrimExpr GetLength() const { return length; }
   DataType GetIndexType() const { return length->dtype; }
+  
+  virtual bool is_fixed() const = 0;
 
   static constexpr const char* _type_key = "tir.sparse.Axis";
   static constexpr const bool _type_has_method_sequal_reduce = true;
@@ -141,6 +143,10 @@ class DenseFixedAxisNode : public DenseAxisNode {
     hash_reduce(from_sparse);
   }
 
+  bool is_fixed() const {
+    return true;
+  }
+
   static constexpr const char* _type_key = "tir.sparse.DenseFixedAxis";
   TVM_DECLARE_FINAL_OBJECT_INFO(DenseFixedAxisNode, DenseAxisNode);
 };
@@ -175,6 +181,10 @@ class DenseVariableAxisNode : public DenseAxisNode {
     hash_reduce(name);
     hash_reduce(length);
     hash_reduce(indptr);
+  }
+
+  bool is_fixed() const {
+    return false;
   }
 
   static constexpr const char* _type_key = "tir.sparse.DenseVariableAxis";
@@ -220,6 +230,10 @@ class SparseFixedAxisNode : public SparseAxisNode {
     hash_reduce(nnz_cols);
   }
 
+  bool is_fixed() const {
+    return true;
+  }
+
   static constexpr const char* _type_key = "tir.sparse.SparseFixedAxis";
   TVM_DECLARE_FINAL_OBJECT_INFO(SparseFixedAxisNode, SparseAxisNode);
 };
@@ -262,6 +276,10 @@ class SparseVariableAxisNode : public SparseAxisNode {
     hash_reduce(indices);
   }
 
+  bool is_fixed() const {
+    return false;
+  }
+
   static constexpr const char* _type_key = "tir.sparse.SparseVariableAxis";
   TVM_DECLARE_FINAL_OBJECT_INFO(SparseVariableAxisNode, SparseAxisNode);
 };
@@ -283,9 +301,9 @@ class SparseVariableAxis : public SparseAxis {
 class AxisTreeNode : public Object {
  public:
   // unordered map that stores the parent relationship between axes.
-  Map<String, Optional<String>> parent;
+  Map<String, String> parent;
   // unordered map that stores the children relationship between axes.
-  Map<Optional<String>, Array<String>> children;
+  Map<String, Array<String>> children;
 
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("parent", &parent);

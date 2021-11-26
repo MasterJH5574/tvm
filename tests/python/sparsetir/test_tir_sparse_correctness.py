@@ -14,7 +14,9 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
+from ctypes import c_float
 import tvm
+import tvm.testing
 from tvm.runtime.ndarray import device
 import tvm.tir as tir
 import scipy.sparse as sp
@@ -113,7 +115,40 @@ def sddmm_tir(a: T.handle, b: T.handle, c: T.handle, indptr: T.handle, indices: 
             with T.init():
                 C_data[vij] = 0.
             C_data[vij] = C_data[vij] + \
-                A[T.lower_bound(C_indptr.data, vij, 0, M + 1) * K + vk] * B[C_indices[vij] * K + vk]
+                A[(T.upper_bound(C_indptr.data, vij, 0, M + 1) - 1) * K + vk] * B[C_indices[vij] * K + vk]
+
+
+@T.prim_func
+def bmm_tir(a: T.handle, b: T.handle, c: T.handle,
+            indptr_i: T.handle, indptr_j: T.handle, indptr_k: T.handle,
+            indptr_ij: T.handle, indptr_jk: T.handle, indptr_ik: T.handle,
+            BATCH: T.int32,
+            NNZ_IJ: T.int32, NNZ_JK: T.int32, NNZ_IK: T.int32) -> None:
+    T.func_attr({"global_symbol": "main", "tir.noalias": True})
+    A = T.match_buffer(a, (NNZ_IJ,), "float32")
+    B = T.match_buffer(b, (NNZ_JK,), "float32")
+    C = T.match_buffer(c, (NNZ_IK,), "float32")
+    indptr_I = T.match_buffer(indptr_i, (BATCH + 1,), "int32")
+    indptr_J = T.match_buffer(indptr_j, (BATCH + 1,), "int32")
+    indptr_K = T.match_buffer(indptr_k, (BATCH + 1,), "int32")
+    indptr_IJ = T.match_buffer(indptr_ij, (BATCH + 1,), "int32")
+    indptr_JK = T.match_buffer(indptr_jk, (BATCH + 1,), "int32")
+    indptr_IK = T.match_buffer(indptr_ik, (BATCH + 1,), "int32")
+    for b in T.grid(BATCH):
+        with T.block("bmm_outer"):
+            T.block_attr({"sparse": True})
+            vb = T.axis.S(BATCH, b)
+            with T.init():
+                T.evaluate(1)
+            for i, j, k in T.grid(indptr_I[vb + 1] - indptr_I[vb], indptr_J[vb + 1] - indptr_J[vb], indptr_K[vb + 1] - indptr_K[vb]):
+                with T.block("bmm_inner"):
+                    T.block_attr({"sparse": True})
+                    vi, vj, vk = T.axis.remap("SRS", [i, j, k])
+                    with T.init():
+                        C[indptr_IK[vb] + vi * (indptr_K[vb + 1] - indptr_K[vb]) + vk] = 0.
+                    C[indptr_IK[vb] + vi * (indptr_K[vb + 1] - indptr_K[vb]) + vk] = C[indptr_IK[vb] + vi * (indptr_K[vb + 1] - indptr_K[vb]) + vk] +\
+                        A[indptr_IJ[vb] + vi * (indptr_J[vb + 1] - indptr_J[vb]) + vj] * \
+                        B[indptr_JK[vb] + vj * (indptr_K[vb + 1] - indptr_K[vb]) + vk]
 
 
 def test_csrmm():
@@ -151,7 +186,7 @@ def test_csrmm():
     f(A_data, X_nd, Y_nd, A_indptr, A_indices)
 
     # assertion
-    assert np.allclose(y_ground_truth.reshape(-1), Y_nd.numpy())
+    tvm.testing.assert_allclose(y_ground_truth.reshape(-1), Y_nd.numpy(), rtol=1e-5)
 
 
 def test_bsrmm():
@@ -199,7 +234,7 @@ def test_bsrmm():
     f(A_data, X_nd, Y_nd, A_indptr, A_indices)
 
     # assertion
-    assert np.allclose(y_ground_truth.reshape(-1), Y_nd.numpy())
+    tvm.testing.assert_allclose(y_ground_truth.reshape(-1), Y_nd.numpy(), rtol=1e-5)
 
 
 def test_ellmm():
@@ -240,7 +275,7 @@ def test_ellmm():
     f(A_data, X_nd, Y_nd, A_indices)
 
     # assertion
-    assert np.allclose(y_ground_truth.reshape(-1), Y_nd.numpy())
+    tvm.testing.assert_allclose(y_ground_truth.reshape(-1), Y_nd.numpy(), rtol=1e-5)
 
 
 def test_sddmm():
@@ -269,7 +304,6 @@ def test_sddmm():
     ij, k = sch.get_loops(blk)
     sch.bind(ij, "blockIdx.x")
     sch.bind(k, "threadIdx.x")
-    sch.decompose_reduction(blk, k)
 
     # convert numpy tensor to tvm ndarray
     C_indices = tvm.nd.array(indices.astype("int32"), device=tvm.cuda(0))
@@ -280,16 +314,81 @@ def test_sddmm():
 
     # build function
     f = tvm.build(sch.mod['main'], target="cuda")
-    # print(f.imported_modules[0].get_source())
     f(X_nd, Y_nd, C_data, C_indptr, C_indices)
 
     # assertion
-    np.allclose(z_ground_truth, C_data.numpy())
+    tvm.testing.assert_allclose(z_ground_truth, C_data.numpy(), rtol=1e-5)
 
 
 def test_bmm():
-    # TODO(zihao)
-    pass
+    # generate random input
+    batch_size = 32
+    n_arr = np.random.randint(128, 1024, size=(batch_size,)).astype("int32")
+    m_arr = np.random.randint(128, 1024, size=(batch_size,)).astype("int32")
+    k_arr = np.random.randint(128, 1024, size=(batch_size,)).astype("int32")
+    nm_arr = n_arr * m_arr
+    mk_arr = m_arr * k_arr
+    nk_arr = n_arr * k_arr
+    indptr_n = np.concatenate(([0], n_arr)).cumsum()
+    indptr_m = np.concatenate(([0], m_arr)).cumsum()
+    indptr_k = np.concatenate(([0], k_arr)).cumsum()
+    indptr_nm = np.concatenate(([0], nm_arr)).cumsum()
+    indptr_mk = np.concatenate(([0], mk_arr)).cumsum()
+    indptr_nk = np.concatenate(([0], nk_arr)).cumsum()
+    nnz_ij = indptr_nm[-1]
+    nnz_jk = indptr_mk[-1]
+    nnz_ik = indptr_nk[-1]
+    As = [
+        np.random.rand(n, m).astype("float32") for n, m in zip(n_arr, m_arr)
+    ]
+    Bs = [
+        np.random.rand(m, k).astype("float32") for m, k in zip(m_arr, k_arr)
+    ]
+    Cs = [
+        np.matmul(A, B) for A, B in zip(As, Bs)
+    ]
+    A_flatten = np.concatenate([A.flatten() for A in As], 0)
+    B_flatten = np.concatenate([B.flatten() for B in Bs], 0)
+    c_flatten = np.concatenate([C.flatten() for C in Cs], 0)
+
+    # specialize function
+    _, _, _, _, _, _, _, _, _, BATCH, NNZ_IJ, NNZ_JK, NNZ_IK = bmm_tir.params
+    sch = tir.Schedule(
+        bmm_tir.specialize({
+            BATCH: batch_size, NNZ_IJ: nnz_ij, NNZ_JK: nnz_jk, NNZ_IK: nnz_ik
+        })
+    )
+    bmm_outer = sch.get_block("bmm_outer")
+    b, = sch.get_loops(bmm_outer)
+    bmm_inner = sch.get_block("bmm_inner")
+    i, j, k = sch.get_loops(bmm_inner)
+    sch.reorder(i, k, j)
+    io, ii = sch.split(i, [None, 32])
+    ko, ki = sch.split(k, [None, 32])
+    sch.bind(b, "blockIdx.x")
+    sch.bind(ki, "threadIdx.x")
+    sch.bind(ii, "threadIdx.y")
+    sch.decompose_reduction(bmm_inner, j)
+
+    # convert numpy tensor to tvm ndarray
+    dev = tvm.cuda(0)
+    A_nd = tvm.nd.array(A_flatten, device=dev)
+    B_nd = tvm.nd.array(B_flatten, device=dev)
+    C_nd = tvm.nd.array(np.zeros_like(c_flatten), device=dev)
+    indptr_n_nd = tvm.nd.array(indptr_n.astype("int32"), device=dev)
+    indptr_m_nd = tvm.nd.array(indptr_m.astype("int32"), device=dev)
+    indptr_k_nd = tvm.nd.array(indptr_k.astype("int32"), device=dev)
+    indptr_nm_nd = tvm.nd.array(indptr_nm.astype("int32"), device=dev)
+    indptr_mk_nd = tvm.nd.array(indptr_mk.astype("int32"), device=dev)
+    indptr_nk_nd = tvm.nd.array(indptr_nk.astype("int32"), device=dev)
+
+    # build function
+    f = tvm.build(sch.mod["main"], target="cuda")
+    print(f.imported_modules[0].get_source())
+    f(A_nd, B_nd, C_nd, indptr_n_nd, indptr_m_nd, indptr_k_nd, indptr_nm_nd, indptr_mk_nd, indptr_nk_nd)
+
+    # assertion
+    tvm.testing.assert_allclose(C_nd.numpy(), c_flatten, rtol=1e-5)
 
 
 if __name__ == "__main__":
