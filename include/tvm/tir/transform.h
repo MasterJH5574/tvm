@@ -481,9 +481,10 @@ TVM_DLL Pass ConvertForLoopsToSerial();
 
 /*!
  * \brief Lower SparseTIR to TIR.
+ * \param axis_tree The axis dependency tree.
  * \return The pass.
  */
-TVM_DLL Pass LowerSparseTIR();
+TVM_DLL Pass LowerSparseTIR(AxisTree axis_tree);
 
 }  // namespace transform
 }  // namespace tir

@@ -146,12 +146,15 @@ AxisTree::AxisTree(Array<String> axis_names, Array<Optional<String>> axis_parent
          "axis_parent_names "
          "array.";
   ObjectPtr<AxisTreeNode> node = make_object<AxisTreeNode>();
-  Map<String, Optional<String>> parent;
-  Map<Optional<String>, Array<String>> children;
+  Map<String, String> parent;
+  Map<String, Array<String>> children;
   for (size_t i = 0; i < axis_names.size(); i++) {
     // update parent map & children map
     String axis_name = axis_names[i];
-    Optional<String> parent_name = axis_parent_names[i];
+    String parent_name("root");
+    if (axis_parent_names[i].defined()) {
+      parent_name = axis_parent_names[i].value();
+    }
     parent.Set(axis_name, parent_name);
 
     auto it = children.find(parent_name);

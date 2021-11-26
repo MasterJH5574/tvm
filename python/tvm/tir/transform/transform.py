@@ -19,6 +19,7 @@
 from typing import Optional
 from . import _ffi_api
 from . import function_pass as _fpass
+from ..sparse import AxisTree
 
 
 def Apply(ftransform):
@@ -751,12 +752,17 @@ def ConvertForLoopsToSerial():
     return _ffi_api.ConvertForLoopsToSerial()  # type: ignore
 
 
-def LowerSparseTIR():
+def LowerSparseTIR(axis_tree: AxisTree):
     """Lower SparseTIR to TIR
+
+    Parameters
+    ----------
+    axis_tree : AxisTree
+        The axis dependency tree.
 
     Returns
     -------
     fpass : tvm.transform.Pass
         The result pass
     """
-    return _ffi_api.LowerSparseTIR()  # type: ignore
+    return _ffi_api.LowerSparseTIR(axis_tree)  # type: ignore
