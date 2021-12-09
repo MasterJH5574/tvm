@@ -25,21 +25,6 @@ from tvm.script import tir as T
 
 
 @T.prim_func
-def csrmm(a: T.handle, b: T.handle, c: T.handle, indptr: T.handle, indices: T.handle, m: T.int32, n: T.int32, k: T.int32, nnz: T.int32) -> None:
-    I = T.dense_fixed(m)
-    J = T.sparse_variable((n, m + 1, nnz), (indptr, indices), "int32")
-    K = T.dense_fixed(k)
-    A = T.match_sparse_buffer(a, (I, J), nnz, "float32")
-    B = T.match_sparse_buffer(b, (T.to_dense(J), K), n * k, "float32")
-    C = T.match_sparse_buffer(c, (I, K), m * k, "float32")
-    with T.iter([T.cord(I), T.cord(J), T.cord(K)], "SRS", "csrmm") as [vi, vj, vk]:
-        T.block_attr({"sparse": True})
-        with T.init():
-            C[vi, vk] = 0.0
-        C[vi, vk] = C[vi, vk] + A[vi, vj] * B[vj, vk]
-
-
-@T.prim_func
 def csrmm_tir(a: T.handle, b: T.handle, c: T.handle, indptr: T.handle, indices: T.handle, M: T.int32, N: T.int32, K: T.int32, NNZ: T.int32) -> None:
     T.func_attr({"global_symbol": "main", "tir.noalias": True})
     A_data = T.match_buffer(a, (NNZ,), "float32")
