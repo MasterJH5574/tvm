@@ -42,9 +42,9 @@ def csrmm(
     J = T.sparse_variable((m, n + 1, nnz), (indptr, indices), "int32")
     K = T.dense_fixed(k)
     A = T.match_sparse_buffer(a, (I, J), nnz, "float32")
-    B = T.match_sparse_buffer(b, (T.to_dense(J), K), m * k, "float32")
+    B = T.match_sparse_buffer(b, (T.dense(J), K), m * k, "float32")
     C = T.match_sparse_buffer(c, (I, K), n * k, "float32")
-    with T.iter([T.cord(I), T.pos(J), T.cord(K)], "SRS", "csrmm") as [vi, vj, vk]:
+    with T.iter([I, J, K], "SRS", "csrmm") as [vi, vj, vk]:
         with T.init():
             C[vi, vk] = 0.0
         C[vi, vk] = C[vi, vk] + A[vi, vj] * B[vj, vk]
@@ -91,7 +91,7 @@ def csr_reduce(
     J = T.sparse_variable((m, n + 1, nnz), (indptr, indices), "int32")
     A = T.match_sparse_buffer(a, (I, J), nnz, "float32")
     B = T.match_sparse_buffer(b, (I,), n, "float32")
-    with T.iter([T.cord(I), T.pos(J)], "SR", "csr_reduce") as [vi, vj]:
+    with T.iter([I, J], "SR", "csr_reduce") as [vi, vj]:
         with T.init():
             B[vi] = 0.0
         B[vi] = B[vi] + A[vi, vj]
@@ -139,10 +139,10 @@ def bsrmm(
     BJ = T.dense_fixed(blk)
     F = T.dense_fixed(feat_size)
     A = T.match_sparse_buffer(a, (I, J, BI, BJ), nnzb * blk * blk, "float32")
-    B = T.match_sparse_buffer(b, (T.to_dense(J), BJ, F), mb * blk * feat_size, "float32")
+    B = T.match_sparse_buffer(b, (T.dense(J), BJ, F), mb * blk * feat_size, "float32")
     C = T.match_sparse_buffer(c, (I, BI, F), nb * blk * feat_size, "float32")
 
-    with T.iter([T.cord(I), T.pos(J), T.cord(BI), T.cord(BJ), T.cord(F)], "SRSRS", "bsrmm") as [
+    with T.iter([I, J, BI, BJ, F], "SRSRS", "bsrmm") as [
         vi,
         vj,
         vbi,
@@ -200,10 +200,10 @@ def ellpack_mm(
     BI = T.dense_fixed(blk)
     BJ = T.dense_fixed(blk)
     A = T.match_sparse_buffer(a, (I, J, BI, BJ), nnz * blk * blk, "float32")
-    B = T.match_sparse_buffer(b, (T.to_dense(J), BJ, F), mb * blk * feat_size, "float32")
+    B = T.match_sparse_buffer(b, (T.dense(J), BJ, F), mb * blk * feat_size, "float32")
     C = T.match_sparse_buffer(c, (I, BI, F), nb * blk * feat_size, "float32")
 
-    with T.iter([T.cord(I), T.pos(J), T.cord(BI), T.cord(BJ), T.cord(F)], "SRSRS", "ellmm") as [
+    with T.iter([I, J, BI, BJ, F], "SRSRS", "ellmm") as [
         vi,
         vj,
         vbi,
@@ -233,48 +233,6 @@ def lowered_ellpack_mm(a: T.handle, b: T.handle, c: T.handle, indices: T.handle,
             C_data[(vi * blk + vbi) * feat_size + vf] = C_data[(vi * blk + vbi) * feat_size + vf] + A_data[((vi *
                                                                                                              col + vj) * blk + vbi) * blk + vbj] * B_data[(J_indices[vi * col + vj] * blk + vbj) * feat_size + vf]
 
-
-@T.prim_func
-def batch_mm(
-    a: T.handle,
-    b: T.handle,
-    c: T.handle,
-    i_indptr: T.handle,
-    j_a_indptr: T.handle,
-    j_b_indptr: T.handle,
-    k_b_indptr: T.handle,
-    k_c_indptr: T.handle,
-    batch: T.int32,
-    n_max: T.int32,
-    m_max: T.int32,
-    k_max: T.int32,
-    nnz_ac1: T.int32,
-    nnz_b1: T.int32,
-    nnz_a2: T.int32,
-    nnz_b2: T.int32,
-    nnz_c2: T.int32,
-) -> None:
-    Batch = T.dense_fixed(batch)
-    I = T.dense_variable((n_max, batch + 1), i_indptr, "int32")
-    J_a = T.dense_variable((m_max, nnz_ac1 + 1), j_a_indptr, "int32")
-    J_b = T.dense_variable((m_max, batch + 1), j_b_indptr, "int32")
-    K_b = T.dense_variable((k_max, nnz_b1 + 1), k_b_indptr, "int32")
-    K_c = T.dense_variable((k_max, nnz_ac1 + 1), k_c_indptr, "int32")
-    A = T.match_sparse_buffer(a, (Batch, I, J_a), nnz_a2, "float32")
-    B = T.match_sparse_buffer(b, (Batch, J_b, K_b), nnz_b2, "float32")
-    C = T.match_sparse_buffer(c, (Batch, I, K_c), nnz_c2, "float32")
-
-    with T.iter([T.cord(Batch), T.cord(I), T.cord(J_a), T.cord(K_b)], "SSSR", "batch_mm") as [
-        vb,
-        vi,
-        vj,
-        vk,
-    ]:
-        with T.init():
-            C[vb, vi, vk] = 0.0
-        C[vb, vi, vk] = C[vb, vi, vk] + A[vb, vi, vj] * B[vb, vj, vk]
-
-
 @T.prim_func
 def csr_element_wise(
     a: T.handle,
@@ -290,7 +248,7 @@ def csr_element_wise(
     A = T.match_sparse_buffer(a, (I, J), nnz, "float32")
     B = T.match_sparse_buffer(b, (I, J), nnz, "float32")
 
-    with T.iter([T.cord(I), T.pos(J)], "SS", "csr_element_wise") as [vi, vj]:
+    with T.iter([I, J], "SS", "csr_element_wise") as [vi, vj]:
         B[vi, vj] = A[vi, vj] * 2.5
 
 
@@ -471,13 +429,6 @@ def test_ellpack_mm():
     tvm.testing.assert_allclose(y_ground_truth.reshape(-1), Y_nd.numpy(), rtol=1e-5, atol=1e-5)
 
 
-def test_batch_mm():
-    mod = tvm.IRModule.from_expr(batch_mm)
-    t = AxisTree({})
-    mod = tvm.tir.transform.LowerSparseTIR(t)(mod)
-    # print(mod["main"].script(tir_prefix="T"))
-
-
 def test_csr_element_wise():
     mod = tvm.IRModule.from_expr(csr_element_wise)
     t = AxisTree({
@@ -508,5 +459,4 @@ if __name__ == "__main__":
     test_csr_reduce()
     test_bsrmm()
     test_ellpack_mm()
-    # test_batch_mm()
     test_csr_element_wise()

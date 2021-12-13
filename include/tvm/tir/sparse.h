@@ -33,6 +33,13 @@
 namespace tvm {
 namespace tir {
 
+enum class AxisKind : int {
+  kDenseFixed = 0,
+  kDenseVariable = 1,
+  kSparseFixed = 2,
+  kSparseVariable = 3
+};
+
 /*!
  * \brief Base type for axis in sparse formats.
  */
@@ -49,6 +56,8 @@ class AxisNode : public Object {
   DataType GetIndexType() const { return length->dtype; }
   
   virtual bool is_fixed() const = 0;
+  
+  virtual AxisKind kind() const = 0;
 
   static constexpr const char* _type_key = "tir.sparse.Axis";
   static constexpr const bool _type_has_method_sequal_reduce = true;
@@ -143,8 +152,12 @@ class DenseFixedAxisNode : public DenseAxisNode {
     hash_reduce(from_sparse);
   }
 
-  bool is_fixed() const {
+  bool is_fixed() const final{
     return true;
+  }
+
+  AxisKind kind() const final {
+    return AxisKind::kDenseFixed;
   }
 
   static constexpr const char* _type_key = "tir.sparse.DenseFixedAxis";
@@ -183,8 +196,12 @@ class DenseVariableAxisNode : public DenseAxisNode {
     hash_reduce(indptr);
   }
 
-  bool is_fixed() const {
+  bool is_fixed() const final {
     return false;
+  }
+
+  AxisKind kind() const final {
+    return AxisKind::kDenseVariable;
   }
 
   static constexpr const char* _type_key = "tir.sparse.DenseVariableAxis";
@@ -230,8 +247,12 @@ class SparseFixedAxisNode : public SparseAxisNode {
     hash_reduce(nnz_cols);
   }
 
-  bool is_fixed() const {
+  bool is_fixed() const final {
     return true;
+  }
+
+  AxisKind kind() const final {
+    return AxisKind::kSparseFixed;
   }
 
   static constexpr const char* _type_key = "tir.sparse.SparseFixedAxis";
@@ -276,8 +297,12 @@ class SparseVariableAxisNode : public SparseAxisNode {
     hash_reduce(indices);
   }
 
-  bool is_fixed() const {
+  bool is_fixed() const final {
     return false;
+  }
+
+  AxisKind kind() const final {
+    return AxisKind::kSparseVariable;
   }
 
   static constexpr const char* _type_key = "tir.sparse.SparseVariableAxis";
@@ -383,15 +408,9 @@ class SparseBuffer : public ObjectRef {
   TVM_DEFINE_OBJECT_REF_METHODS(SparseBuffer, ObjectRef, SparseBufferNode);
 };
 
-enum class SpIterKind : int {
-  kDenseFixed = 0,
-  kDenseVariable = 1,
-  kSparseFixed = 2,
-  kSparseVariable = 3
-};
 
 // overload printing of for type.
-TVM_DLL std::ostream& operator<<(std::ostream& os, SpIterKind kind);
+TVM_DLL std::ostream& operator<<(std::ostream& os, AxisKind kind);
 
 /*!
  * \brief Iterator variables in SparseTIR
@@ -400,7 +419,6 @@ class SpIterVarNode : public Object {
  public:
   Var var;
   PrimExpr max_extent;
-  SpIterKind kind;
   bool is_reduction;
   Axis axis;
 
@@ -409,13 +427,11 @@ class SpIterVarNode : public Object {
     v->Visit("max_extent", &max_extent);
     v->Visit("axis", &axis);
     v->Visit("is_reduction", &is_reduction);
-    v->Visit("kind", &kind);
   }
 
   bool SEqualReduce(const SpIterVarNode* other, SEqualReducer equal) const {
     return equal(var, other->var) && equal(max_extent, other->max_extent) &&
-           equal(axis, other->axis) && equal(is_reduction, other->is_reduction) &&
-           equal(kind, other->kind);
+           equal(axis, other->axis) && equal(is_reduction, other->is_reduction);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
@@ -423,7 +439,6 @@ class SpIterVarNode : public Object {
     hash_reduce(max_extent);
     hash_reduce(axis);
     hash_reduce(is_reduction);
-    hash_reduce(kind);
   }
 
   static constexpr const char* _type_key = "tir.sparse.SpIterVar";
@@ -434,8 +449,7 @@ class SpIterVarNode : public Object {
 
 class SpIterVar : public ObjectRef {
  public:
-  TVM_DLL explicit SpIterVar(Var var, PrimExpr max_extent, SpIterKind kind, bool is_reduction,
-                             Axis axis);
+  TVM_DLL explicit SpIterVar(Var var, PrimExpr max_extent, bool is_reduction, Axis axis);
 
   /*!
    * \return the corresponding var in the IterVar.
@@ -449,18 +463,18 @@ class SpIterVar : public ObjectRef {
 inline SpIterVar::operator PrimExpr() const { return (*this)->var; }
 
 // inline implementations
-inline const char* SpIterKind2String(SpIterKind t) {
+inline const char* SpIterKind2String(AxisKind t) {
   switch (t) {
-    case SpIterKind::kDenseFixed:
+    case AxisKind::kDenseFixed:
       return "dense_fixed";
-    case SpIterKind::kDenseVariable:
+    case AxisKind::kDenseVariable:
       return "dense_variable";
-    case SpIterKind::kSparseFixed:
+    case AxisKind::kSparseFixed:
       return "sparse_fixed";
-    case SpIterKind::kSparseVariable:
+    case AxisKind::kSparseVariable:
       return "sparse_variable";
   }
-  LOG(FATAL) << "Unknown SpIterKind" << t;
+  LOG(FATAL) << "Unknown AxisKind" << t;
   throw;
 }
 
