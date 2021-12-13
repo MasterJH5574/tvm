@@ -22,18 +22,15 @@ from tvm.script import tir as T
 from tvm.tir.sparse import AxisTree
 
 @T.prim_func
-def csr2bsr_nnz_inf(
+def csr2bsr_cnt_nnz(
     indptr: T.handle, indices: T.handle,
     new_cord: T.handle, glb_counter: T.handle,
-    n: T.int32, m: T.int32, nnz: T.int32,
-    max_nnz: T.int32) -> None:
+    n: T.int32, m: T.int32, nnz: T.int32) -> None:
     I = T.dense_fixed(n)
     J = T.sparse_variable((m, n + 1, nnz), (indptr, indices), "int32")
     K = T.dense_fixed(2)
-    Glb_counter = T.match_buffer(glb_counter, (1,), "int32")
     New_cord = T.match_sparse_buffer(new_cord, (I, J, K), nnz * 2, "int32")
-    with T.iter([T.pos(I), T.cord(J), ], "SS", "csr2bsr_nnz_inf") as [vi, vj]:
-        #offset = T.atomic_add(Glb_counter.data, 1)
+    with T.iter([I, J], "SS", "csr2bsr_cnt_nnz") as [vi, vj]:
         New_cord[vi, vj, 0] = 0
         New_cord[vi, vj, 1] = 1
         
@@ -52,9 +49,20 @@ def csr2bsr(indptr_1: T.handle, indices_1: T.handle, indptr_2: T.handle, indices
     Jbi = T.dense_fixed(block_size)
     A_csr = T.match_sparse_buffer(a_csr, (I, J), nnz, "float32")
     A_bsr = T.match_sparse_buffer(a_bsr, (Ibo, Jbo, Ibi, Jbi), nnzb * block_size * block_size, "float32")
-    with T.iter([T.pos(I), T.cord(J)], "SS", "csr2bsrm") as [vi, vj]:
+    with T.iter([I, J], "SS", "csr2bsrm") as [vi, vj]:
         A_bsr[T.floordiv(vi, block_size), T.floordiv(vj, block_size), T.floormod(vi, block_size), T.floormod(vj, block_size)] =\
             A_csr[vi, vj]
+
+
+def test_cnt_nnz():
+    mod = tvm.IRModule.from_expr(csr2bsr_cnt_nnz)
+    t = AxisTree({
+        "J": "I",
+        "I": None,
+        "K": None
+    })
+    mod = tvm.tir.transform.LowerSparseTIR(t)(mod)
+    print(mod['main'].script())
 
 
 def test_csr2bsr():
@@ -73,4 +81,5 @@ def test_csr2bsr():
 
 
 if __name__ == "__main__":
+    test_cnt_nnz()
     test_csr2bsr()

@@ -16,10 +16,11 @@
 # under the License.
 """SparseTIR axes and SparseBuffer
 """
-from typing import List, Dict, Optional
+from typing import Dict, List, Optional
+
 import tvm._ffi
 from tvm.ir import PrimExpr
-from tvm.runtime import Object, const
+from tvm.runtime import Object
 from tvm.tir import Var
 
 from . import _ffi_api
@@ -219,9 +220,6 @@ class SpIterVar(Object):
     max_extent : PrimExpr
         The maximum extent of the SpIterVar
 
-    kind : int
-        The kind of the SpIterVar
-
     is_reduction : bool
         Whether the SpIterVar is a reduction iterator
 
@@ -231,7 +229,6 @@ class SpIterVar(Object):
 
     var: Var
     max_extent: PrimExpr
-    kind: int
     is_reduction: bool
     axis: Axis
 
@@ -240,7 +237,7 @@ class SpIterVar(Object):
     SparseFixed = 2
     SparseVariable = 3
 
-    def __init__(self, var, max_extent, kind, is_reduction, axis):
+    def __init__(self, var, max_extent, is_reduction, axis):
         self.__init_handle_by_constructor__(
-            _ffi_api.SpIterVar, var, max_extent, kind, is_reduction, axis  # type: ignore
+            _ffi_api.SpIterVar, var, max_extent, is_reduction, axis  # type: ignore
         )

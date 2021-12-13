@@ -211,19 +211,19 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
       p->stream << "], " << op->data << ")";
     });
 
-// SpIterKind
-std::ostream& operator<<(std::ostream& out, SpIterKind type) {
+// AxisKind
+std::ostream& operator<<(std::ostream& out, AxisKind type) {
   switch (type) {
-    case SpIterKind::kDenseFixed:
+    case AxisKind::kDenseFixed:
       out << "dense-fixed";
       break;
-    case SpIterKind::kDenseVariable:
+    case AxisKind::kDenseVariable:
       out << "dense-variable";
       break;
-    case SpIterKind::kSparseFixed:
+    case AxisKind::kSparseFixed:
       out << "sparse-fixed";
       break;
-    case SpIterKind::kSparseVariable:
+    case AxisKind::kSparseVariable:
       out << "sparse-variable";
       break;
     default:
@@ -233,24 +233,13 @@ std::ostream& operator<<(std::ostream& out, SpIterKind type) {
 }
 
 // SpIterVar
-SpIterVar::SpIterVar(Var var, PrimExpr max_extent, SpIterKind kind, bool is_reduction, Axis axis) {
+SpIterVar::SpIterVar(Var var, PrimExpr max_extent, bool is_reduction, Axis axis) {
   ObjectPtr<SpIterVarNode> node = make_object<SpIterVarNode>();
 
   arith::Analyzer ana;
-  const char* err_str = "ValueError: The given kind doesn't match the type of the given axis";
-  if (kind == SpIterKind::kDenseFixed) {
-    CHECK(!axis->IsInstance<DenseVariableAxisNode>()) << err_str;
-  } else if (kind == SpIterKind::kDenseVariable) {
-    CHECK(axis->IsInstance<DenseVariableAxisNode>()) << err_str;
-  } else if (kind == SpIterKind::kSparseFixed) {
-    CHECK(axis->IsInstance<SparseFixedAxisNode>()) << err_str;
-  } else if (kind == SpIterKind::kSparseVariable) {
-    CHECK(axis->IsInstance<SparseVariableAxisNode>()) << err_str;
-  }
 
   node->var = Var(std::move(var));
   node->max_extent = std::move(max_extent);
-  node->kind = kind;
   node->is_reduction = is_reduction;
   node->axis = std::move(axis);
   data_ = std::move(node);
@@ -259,15 +248,15 @@ SpIterVar::SpIterVar(Var var, PrimExpr max_extent, SpIterKind kind, bool is_redu
 TVM_REGISTER_NODE_TYPE(SpIterVarNode);
 
 TVM_REGISTER_GLOBAL("tir.sparse.SpIterVar")
-    .set_body_typed([](Var var, PrimExpr max_extent, int kind, bool is_reduction, Axis axis) {
-      return SpIterVar(var, max_extent, SpIterKind(kind), is_reduction, axis);
+    .set_body_typed([](Var var, PrimExpr max_extent, bool is_reduction, Axis axis) {
+      return SpIterVar(var, max_extent, is_reduction, axis);
     });
 
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     .set_dispatch<SpIterVarNode>([](const ObjectRef& node, ReprPrinter* p) {
       auto* op = static_cast<const SpIterVarNode*>(node.get());
       p->stream << "sp_iter_var(" << op->var->name_hint << ", " << op->max_extent << ", "
-                << op->kind << ", " << (op->is_reduction ? "reduction" : "spatial") << ", "
+                << (op->is_reduction ? "reduction" : "spatial") << ", "
                 << op->axis->name << ")";
     });
 
