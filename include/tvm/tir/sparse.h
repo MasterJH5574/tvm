@@ -75,6 +75,7 @@ class AxisNode : public Object {
   DataType GetIndexType() const { return length->dtype; }
 
   virtual AxisKind kind() const = 0;
+  virtual PrimExpr nnz() const = 0;
 
   static constexpr const char* _type_key = "tir.sparse.Axis";
   static constexpr const bool _type_has_method_sequal_reduce = true;
@@ -133,6 +134,8 @@ class SparseAxis : public Axis {
 class DenseFixedAxisNode : public DenseAxisNode {
  public:
   AxisKind kind() const final { return AxisKind::kDenseFixed; }
+
+  PrimExpr nnz() const final { return length; }
 
   static constexpr const char* _type_key = "tir.sparse.DenseFixedAxis";
   TVM_DECLARE_BASE_OBJECT_INFO(DenseFixedAxisNode, DenseAxisNode);
@@ -234,6 +237,7 @@ class FusedAxis : public DenseFixedAxis {
 class DenseVariableAxisNode : public DenseAxisNode {
  public:
   Buffer indptr;
+  PrimExpr nnz_;
 
   void VisitAttrs(AttrVisitor* v) {
     DenseAxisNode::VisitAttrs(v);
@@ -249,9 +253,9 @@ class DenseVariableAxisNode : public DenseAxisNode {
     hash_reduce(indptr);
   }
 
-  PrimExpr nnz() const { return indptr->shape[0]; }
-
   AxisKind kind() const final { return AxisKind::kDenseVariable; }
+
+  PrimExpr nnz() const final { return nnz_; }
 
   static constexpr const char* _type_key = "tir.sparse.DenseVariableAxis";
   TVM_DECLARE_FINAL_OBJECT_INFO(DenseVariableAxisNode, DenseAxisNode);
@@ -263,7 +267,7 @@ class DenseVariableAxisNode : public DenseAxisNode {
  */
 class DenseVariableAxis : public DenseAxis {
  public:
-  TVM_DLL explicit DenseVariableAxis(String name, PrimExpr length, Buffer indptr);
+  TVM_DLL explicit DenseVariableAxis(String name, PrimExpr length, PrimExpr nnz, Buffer indptr);
 
   TVM_DEFINE_OBJECT_REF_METHODS(DenseVariableAxis, DenseAxis, DenseVariableAxisNode);
 };
@@ -289,10 +293,12 @@ class SparseFixedAxisNode : public SparseAxisNode {
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
-    SparseFixedAxisNode::SHashReduce(hash_reduce);
+    SparseAxisNode::SHashReduce(hash_reduce);
     hash_reduce(indices);
     hash_reduce(nnz_cols);
   }
+
+  PrimExpr nnz() const { return indices->shape[0]; }
 
   AxisKind kind() const final { return AxisKind::kSparseFixed; }
 
@@ -336,7 +342,7 @@ class SparseVariableAxisNode : public SparseAxisNode {
     hash_reduce(indices);
   }
 
-  PrimExpr nnz() const { return indptr->shape[0]; }
+  PrimExpr nnz() const { return indices->shape[0]; }
 
   AxisKind kind() const final { return AxisKind::kSparseVariable; }
 

@@ -127,11 +127,12 @@ class DenseVariableAxis(DenseAxis):
 
     name: str
     length: PrimExpr
+    nnz: PrimExpr
     indptr: Buffer
 
-    def __init__(self, name, length, indptr):
+    def __init__(self, name, length, nnz, indptr):
         self.__init_handle_by_constructor__(
-            _ffi_api.DenseVariableAxis, name, length, indptr  # type: ignore
+            _ffi_api.DenseVariableAxis, name, length, nnz, indptr  # type: ignore
         )
 
 

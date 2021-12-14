@@ -885,11 +885,11 @@ class DenseVariable(SpecialStmt):
                     f"`dense_variable` expected assign to only one var, but got {names}", span
                 )
 
-            length, indptr_len = shape
+            length, indptr_len, nnz = shape
             indptr_buf = tvm.tir.decl_buffer(
                 (indptr_len,), dtype=idtype, name=names[0] + "_indptr", span=span
             )
-            axis = DenseVariableAxis(names[0], length, indptr_buf)
+            axis = DenseVariableAxis(names[0], length, nnz, indptr_buf)
             self.context.sp_struct.append(axis)
             self.context.sp_struct_params.append([indptr_var])
             self.context.update_symbol(names[0], axis, self.node)

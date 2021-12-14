@@ -68,10 +68,11 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
 /******** DenseVariableAxis ********/
 
 /*! \brief Default constuctor of DenseVariableAxis */
-DenseVariableAxis::DenseVariableAxis(String name, PrimExpr length, Buffer indptr) {
+DenseVariableAxis::DenseVariableAxis(String name, PrimExpr length, PrimExpr nnz, Buffer indptr) {
   ObjectPtr<DenseVariableAxisNode> node = make_object<DenseVariableAxisNode>();
   node->name = std::move(name);
   node->length = std::move(length);
+  node->nnz_ = std::move(nnz);
   node->indptr = std::move(indptr);
   data_ = std::move(node);
 }
@@ -79,8 +80,8 @@ DenseVariableAxis::DenseVariableAxis(String name, PrimExpr length, Buffer indptr
 TVM_REGISTER_NODE_TYPE(DenseVariableAxisNode);
 
 TVM_REGISTER_GLOBAL("tir.sparse.DenseVariableAxis")
-    .set_body_typed([](String name, PrimExpr length, Buffer indptr) {
-      return DenseVariableAxis(name, length, indptr);
+    .set_body_typed([](String name, PrimExpr length, PrimExpr nnz, Buffer indptr) {
+      return DenseVariableAxis(std::move(name), std::move(length), std::move(nnz), std::move(indptr));
     });
 
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
@@ -128,17 +129,7 @@ FusedAxis::FusedAxis(Array<Axis> group, int index) {
     fused_name += group[i]->name;
   }
   node->name = "fused_" + fused_name + "_" + group[index]->name;
-
-  if (const auto* df_axis = group[index].as<DenseFixedAxisNode>()) {
-    node->length = df_axis->length;
-  } else if (const auto* sf_axis = group[index].as<SparseFixedAxisNode>()) {
-    // TODO(zihao): accumulate previous dimensions.
-  } else if (const auto* dv_axis = group[index].as<DenseVariableAxisNode>()) {
-    node->length = dv_axis->nnz();
-  } else if (const auto* sv_axis = group[index].as<SparseVariableAxisNode>()) {
-    node->length = sv_axis->nnz();
-  }
-
+  node->length = group[index]->nnz();
   node->is_derived_axis = true;
   node->group = std::move(group);
   node->index = index;
@@ -183,7 +174,7 @@ TVM_REGISTER_NODE_TYPE(SparseFixedAxisNode);
 
 TVM_REGISTER_GLOBAL("tir.sparse.SparseFixedAxis")
     .set_body_typed([](String name, PrimExpr length, Buffer indices, PrimExpr nnz_cols) {
-      return SparseFixedAxis(name, length, indices, nnz_cols);
+      return SparseFixedAxis(std::move(name), std::move(length), std::move(indices), std::move(nnz_cols));
     });
 
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
@@ -210,7 +201,7 @@ TVM_REGISTER_NODE_TYPE(SparseVariableAxisNode);
 
 TVM_REGISTER_GLOBAL("tir.sparse.SparseVariableAxis")
     .set_body_typed([](String name, PrimExpr length, Buffer indptr, Buffer indices) {
-      return SparseVariableAxis(name, length, indptr, indices);
+      return SparseVariableAxis(std::move(name), std::move(length), std::move(indptr), std::move(indices));
     });
 
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
@@ -259,7 +250,7 @@ TVM_REGISTER_NODE_TYPE(AxisTreeNode);
 
 TVM_REGISTER_GLOBAL("tir.sparse.AxisTree")
     .set_body_typed([](Array<String> axis_names, Array<Optional<String>> axis_parent_names) {
-      return AxisTree(axis_names, axis_parent_names);
+      return AxisTree(std::move(axis_names), std::move(axis_parent_names));
     });
 
 /******** SparseBuffer ********/
@@ -279,7 +270,7 @@ TVM_REGISTER_NODE_TYPE(SparseBufferNode);
 
 TVM_REGISTER_GLOBAL("tir.sparse.SparseBuffer")
     .set_body_typed([](Array<Axis> axes, Buffer data, String name) {
-      return SparseBuffer(axes, data, name);
+      return SparseBuffer(std::move(axes), std::move(data), std::move(name));
     });
 
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
@@ -338,7 +329,7 @@ TVM_REGISTER_NODE_TYPE(SpIterVarNode);
 
 TVM_REGISTER_GLOBAL("tir.sparse.SpIterVar")
     .set_body_typed([](Var var, PrimExpr max_extent, bool is_reduction, Axis axis) {
-      return SpIterVar(var, max_extent, is_reduction, axis);
+      return SpIterVar(std::move(var), std::move(max_extent), is_reduction, std::move(axis));
     });
 
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
