@@ -65,17 +65,48 @@ class DenseFixedAxis(DenseAxis):
 
     length : PrimExpr
         The length of the axis
-
-    from_sparse : Optional[SparseAxis]
-        The SparseAxis that this axis is created from
     """
 
     name: str
     length: PrimExpr
-    from_sparse: Optional[SparseAxis]
 
-    def __init__(self, name, length, from_sparse=None):
-        self.__init_handle_by_constructor__(_ffi_api.DenseFixedAxis, name, length, from_sparse)  # type: ignore
+    def __init__(self, name, length):
+        self.__init_handle_by_constructor__(_ffi_api.DenseFixedAxis, name, length)  # type: ignore
+
+
+@tvm._ffi.register_object("tir.sparse.DenseFromSparseAxis")
+class DenseFromSparseAxis(DenseFixedAxis):
+    """DenseFromSparseAxis node
+
+    Parameters
+    ----------
+    base : Axis
+        The based sparse axis.
+    """
+    
+    base: Axis
+
+    def __init__(self, base):
+        self.__init_handle_by_constructor__(_ffi_api.DenseFromSparseAxis, base)  # type: ignore
+
+
+@tvm._ffi.register_object("tir.sparse.FusedAxis")
+class FusedAxis(DenseFixedAxis):
+    """FusedAxis node
+
+    Parameters
+    ----------
+    group : List[Axis]
+        The axes group to be fused.
+    index : int
+        The index of current axis in the fused axes group.
+    """
+
+    group: List[Axis]
+    index: int
+
+    def __init__(self, group, index):
+        self.__init_handle_by_constructor__(_ffi_api.FusedAxis, group, index)  # type: ignore
 
 
 @tvm._ffi.register_object("tir.sparse.DenseVariableAxis")

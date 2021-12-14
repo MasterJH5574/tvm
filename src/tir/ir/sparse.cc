@@ -29,7 +29,8 @@
 namespace tvm {
 namespace tir {
 
-// Axis
+/******** Attributes of sparse axis. ********/
+
 TVM_REGISTER_GLOBAL("tir.sparse.GetAxisName").set_body_typed([](Axis axis) {
   return axis->GetName();
 });
@@ -42,33 +43,31 @@ TVM_REGISTER_GLOBAL("tir.sparse.GetAxisIndexType").set_body_typed([](Axis axis) 
   return DLDataType2String(axis->GetIndexType());
 });
 
-// DenseFixedAxis
-DenseFixedAxis::DenseFixedAxis(String name, PrimExpr length, Optional<SparseAxis> from_sparse) {
+/******** DenseFixedAxis ********/
+
+/*! \brief Default constructor of DenseFixedAxis */
+DenseFixedAxis::DenseFixedAxis(String name, PrimExpr length) {
   ObjectPtr<DenseFixedAxisNode> node = make_object<DenseFixedAxisNode>();
   node->name = std::move(name);
   node->length = std::move(length);
-  node->from_sparse = std::move(from_sparse);
   data_ = std::move(node);
 }
 
 TVM_REGISTER_NODE_TYPE(DenseFixedAxisNode);
 
-TVM_REGISTER_GLOBAL("tir.sparse.DenseFixedAxis")
-    .set_body_typed([](String name, PrimExpr length, Optional<SparseAxis> from_sparse) {
-      return DenseFixedAxis(name, length, from_sparse);
-    });
+TVM_REGISTER_GLOBAL("tir.sparse.DenseFixedAxis").set_body_typed([](String name, PrimExpr length) {
+  return DenseFixedAxis(std::move(name), std::move(length));
+});
 
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     .set_dispatch<DenseFixedAxisNode>([](const ObjectRef& node, ReprPrinter* p) {
       auto* op = static_cast<const DenseFixedAxisNode*>(node.get());
-      p->stream << "dense_fixed(" << op->name << ", " << op->length;
-      if (op->from_sparse.defined()) {
-        p->stream << ", from_sparse=" << op->from_sparse.value();
-      }
-      p->stream << ")";
+      p->stream << "dense_fixed(" << op->name << ", " << op->length << ")";
     });
 
-// DenseVariableAxis
+/******** DenseVariableAxis ********/
+
+/*! \brief Default constuctor of DenseVariableAxis */
 DenseVariableAxis::DenseVariableAxis(String name, PrimExpr length, Buffer indptr) {
   ObjectPtr<DenseVariableAxisNode> node = make_object<DenseVariableAxisNode>();
   node->name = std::move(name);
@@ -87,10 +86,90 @@ TVM_REGISTER_GLOBAL("tir.sparse.DenseVariableAxis")
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     .set_dispatch<DenseVariableAxisNode>([](const ObjectRef& node, ReprPrinter* p) {
       auto* op = static_cast<const DenseVariableAxisNode*>(node.get());
-      p->stream << "dense_variable(" << op->name << ", " << op->length << ", " << op->indptr->name;
+      p->stream << "dense_variable(" << op->name << ", " << op->length << ", " << op->indptr->name
+                << ")";
     });
 
-// SparseFixedAxis
+/******** DenseFromSparseAxis ********/
+
+/*! \brief Default constructor of DenseFromSparseAxis */
+DenseFromSparseAxis::DenseFromSparseAxis(SparseAxis base) {
+  ObjectPtr<DenseFromSparseAxisNode> node = make_object<DenseFromSparseAxisNode>();
+  node->name = base->name + "_dense";
+  node->length = base->length;
+  node->is_derived_axis = true;
+  node->base = std::move(base);
+  data_ = std::move(node);
+}
+
+TVM_REGISTER_NODE_TYPE(DenseFromSparseAxisNode);
+
+TVM_REGISTER_GLOBAL("tir.sparse.DenseFromSparseAxis").set_body_typed([](SparseAxis base) {
+  return DenseFromSparseAxis(std::move(base));
+});
+
+TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
+    .set_dispatch<DenseFromSparseAxisNode>([](const ObjectRef& node, ReprPrinter* p) {
+      auto* op = static_cast<const DenseFromSparseAxisNode*>(node.get());
+      p->stream << "dense_from_sparse(" << op->base->name << ")";
+    });
+
+/******** FusedAxis ********/
+
+/*! \brief Default constructor of FusedAxis */
+FusedAxis::FusedAxis(Array<Axis> group, int index) {
+  CHECK(index < int(group.size())) << "Index " << index << "exceeds the size of fused axes group.";
+
+  // TODO(zihao): check whether it valid to fuse axes in the group.
+
+  ObjectPtr<FusedAxisNode> node = make_object<FusedAxisNode>();
+  std::string fused_name = group[0]->name;
+  for (int i = 1; i < group.size(); ++i) {
+    fused_name += group[i]->name;
+  }
+  node->name = "fused_" + fused_name + "_" + group[index]->name;
+
+  if (const auto* df_axis = group[index].as<DenseFixedAxisNode>()) {
+    node->length = df_axis->length;
+  } else if (const auto* sf_axis = group[index].as<SparseFixedAxisNode>()) {
+    // TODO(zihao): accumulate previous dimensions.
+  } else if (const auto* dv_axis = group[index].as<DenseVariableAxisNode>()) {
+    node->length = dv_axis->nnz();
+  } else if (const auto* sv_axis = group[index].as<SparseVariableAxisNode>()) {
+    node->length = sv_axis->nnz();
+  }
+
+  node->is_derived_axis = true;
+  node->group = std::move(group);
+  node->index = index;
+  data_ = std::move(node);
+}
+
+TVM_REGISTER_NODE_TYPE(FusedAxisNode);
+
+TVM_REGISTER_GLOBAL("tir.sparse.FusedAxis").set_body_typed([](Array<Axis> group, int index) {
+  return FusedAxis(std::move(group), index);
+});
+
+TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
+    .set_dispatch<FusedAxisNode>([](const ObjectRef& node, ReprPrinter* p) {
+      auto* op = static_cast<const FusedAxisNode*>(node.get());
+      p->stream << "fused(";
+      bool first = true;
+      for (auto&& orig_axis : op->group) {
+        if (first) {
+          first = false;
+        } else {
+          p->stream << ", ";
+        }
+        p->stream << orig_axis->name;
+      }
+      p->stream << ")";
+    });
+
+/******** SparseFixedAxis ********/
+
+/*! \brief Default constructor of SparseFixedAxis */
 SparseFixedAxis::SparseFixedAxis(String name, PrimExpr length, Buffer indices, PrimExpr nnz_cols) {
   ObjectPtr<SparseFixedAxisNode> node = make_object<SparseFixedAxisNode>();
   node->name = std::move(name);
@@ -114,7 +193,9 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
                 << op->indices->name << ")";
     });
 
-// SparseVariableAxis
+/******** SparseVariableAxis ********/
+
+/*! \brief Default constructor of SparseVariableAxis */
 SparseVariableAxis::SparseVariableAxis(String name, PrimExpr length, Buffer indptr,
                                        Buffer indices) {
   ObjectPtr<SparseVariableAxisNode> node = make_object<SparseVariableAxisNode>();
@@ -139,7 +220,9 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
                 << ", " << op->indices->name << ")";
     });
 
-// AxisTree
+/******** AxisTree ********/
+
+/*! \brief Default constructor of AxisTree */
 AxisTree::AxisTree(Array<String> axis_names, Array<Optional<String>> axis_parent_names) {
   CHECK_EQ(axis_names.size(), axis_parent_names.size())
       << "ValueError: The axis_names array should have the same length as "
@@ -179,7 +262,9 @@ TVM_REGISTER_GLOBAL("tir.sparse.AxisTree")
       return AxisTree(axis_names, axis_parent_names);
     });
 
-// SparseBuffer
+/******** SparseBuffer ********/
+
+/*! \brief Default constructor of SparseBuffer */
 SparseBuffer::SparseBuffer(Array<Axis> axes, Buffer data, String name) {
   ObjectPtr<SparseBufferNode> node = make_object<SparseBufferNode>();
   CHECK_GT(static_cast<int>(axes.size()), 0)
@@ -211,7 +296,9 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
       p->stream << "], " << op->data << ")";
     });
 
-// AxisKind
+/******** AxisKind ********/
+
+/*! \brief Printer function of Axiskind. */
 std::ostream& operator<<(std::ostream& out, AxisKind type) {
   switch (type) {
     case AxisKind::kDenseFixed:
@@ -232,7 +319,9 @@ std::ostream& operator<<(std::ostream& out, AxisKind type) {
   return out;
 }
 
-// SpIterVar
+/******** SpIterVar ********/
+
+/*! \brief Default constructor of SpIterVar. */
 SpIterVar::SpIterVar(Var var, PrimExpr max_extent, bool is_reduction, Axis axis) {
   ObjectPtr<SpIterVarNode> node = make_object<SpIterVarNode>();
 
@@ -256,8 +345,7 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     .set_dispatch<SpIterVarNode>([](const ObjectRef& node, ReprPrinter* p) {
       auto* op = static_cast<const SpIterVarNode*>(node.get());
       p->stream << "sp_iter_var(" << op->var->name_hint << ", " << op->max_extent << ", "
-                << (op->is_reduction ? "reduction" : "spatial") << ", "
-                << op->axis->name << ")";
+                << (op->is_reduction ? "reduction" : "spatial") << ", " << op->axis->name << ")";
     });
 
 }  // namespace tir
