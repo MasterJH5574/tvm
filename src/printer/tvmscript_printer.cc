@@ -459,8 +459,12 @@ Doc TVMScriptPrinter::AllocAxis(const Axis& axis) {
   Doc val;
   const auto* df_axis = axis.as<DenseFixedAxisNode>();
 
-  if (df_axis != nullptr && df_axis->from_sparse.defined()) {
-    val << tir_prefix_ << ".dense(" << Print(df_axis->from_sparse.value()) << ")";
+  if (df_axis != nullptr && df_axis->is_derived_axis) {
+    if (const DenseFromSparseAxisNode* dfs_axis = axis.as<DenseFromSparseAxisNode>()) {
+      val = Doc::Text(tir_prefix_ + ".dense(" + dfs_axis->base->name + ")");
+    } else {
+      CHECK(false) << "Cannot allocate fused axis";
+    }
   } else {
     std::string name = axis->name;
     if (name.length() == 0 || !std::isalnum(name[0])) {
@@ -1234,9 +1238,28 @@ Doc TVMScriptPrinter::PrintSparseBlockName(const SparseBlockNode* op) {
 
   for (int i = 0; i < n_iter; ++i) {
     const SpIterVar& sp_iter = op->sp_iter_vars[i];
+    const Axis& axis = sp_iter->axis;
     Doc iter_doc;
-    iter_doc << sp_iter->axis->name;
-    // TODO(zihao): fix expressions like T.dense(J)
+    
+    std::string axis_repr = sp_iter->axis->name;
+    if (axis->is_derived_axis) {
+      if (const DenseFromSparseAxisNode* dfs_axis = axis.as<DenseFromSparseAxisNode>()) {
+        iter_doc << tir_prefix_ << ".dense(" << dfs_axis->base->name << ")";
+      } else {
+        const FusedAxisNode* fused_axis = axis.as<FusedAxisNode>();
+        std::string orig_axis_name = fused_axis->group[fused_axis->index]->name;
+        if (fused_axis->index == 0) {
+          iter_doc << tir_prefix_ << ".fuse(" << orig_axis_name;
+        } else if (fused_axis->index == fused_axis->group.size() - 1) {
+          iter_doc << orig_axis_name << ")";
+        } else {
+          iter_doc << orig_axis_name;
+        }
+      }
+    } else {
+      iter_doc << axis->name;
+    }
+
     var_not_in_headers_.insert(sp_iter->var.get());
     sp_iter_docs.push_back(iter_doc);
     sp_iter_name_docs.push_back(Print(sp_iter->var));

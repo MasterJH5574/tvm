@@ -39,6 +39,24 @@ def csrmm(a: T.handle, b: T.handle, c: T.handle, indptr: T.handle, indices: T.ha
 
 
 @T.prim_func
+def csrmm_dense_iter(a: T.handle, b: T.handle, c: T.handle, indptr: T.handle, indices: T.handle) -> None:
+    n = T.var("int32")
+    m = T.var("int32")
+    k = T.var("int32")
+    nnz = T.var("int32")
+    I = T.dense_fixed(n)
+    J = T.sparse_variable((m, n + 1, nnz), (indptr, indices), "int32")
+    K = T.dense_fixed(k)
+    A = T.match_sparse_buffer(a, (I, J), nnz, "float32")
+    B = T.match_sparse_buffer(b, (T.dense(J), K), m * k, "float32")
+    C = T.match_sparse_buffer(c, (I, K), n * k, "float32")
+    with T.iter([I, T.dense(J), K], "SRS", "csrmm") as [vi, vj, vk]:
+        with T.init():
+            C[vi, vk] = 0.0
+        C[vi, vk] = C[vi, vk] + A[vi, vj] * B[vj, vk]
+
+
+@T.prim_func
 def csr_reduce(a: T.handle, b: T.handle, indptr: T.handle, indices: T.handle) -> None:
     n = T.var("int32")
     m = T.var("int32")
@@ -130,6 +148,12 @@ def test_csrmm():
     tvm.ir.assert_structural_equal(func, rt_func, True)
 
 
+def test_csrmm_dense_iter():
+    func = csrmm_dense_iter
+    rt_func = tvm.script.from_source(func.script(show_meta=True))
+    tvm.ir.assert_structural_equal(func, rt_func, True)
+
+
 def test_csr_reduce():
     func = csr_reduce
     rt_func = tvm.script.from_source(func.script(show_meta=True))
@@ -156,6 +180,7 @@ def test_csr_element_wise():
 
 if __name__ == "__main__":
     test_csrmm()
+    test_csrmm_dense_iter()
     test_csr_reduce()
     test_bsrmm()
     test_ellpack_mm()

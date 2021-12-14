@@ -14,9 +14,6 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-from os import replace
-from numpy.core.fromnumeric import size
-from scipy.sparse import bsr
 import tvm
 import tvm.testing
 import tvm.tir as tir
@@ -45,6 +42,30 @@ def csrmm(
     B = T.match_sparse_buffer(b, (T.dense(J), K), m * k, "float32")
     C = T.match_sparse_buffer(c, (I, K), n * k, "float32")
     with T.iter([I, J, K], "SRS", "csrmm") as [vi, vj, vk]:
+        with T.init():
+            C[vi, vk] = 0.0
+        C[vi, vk] = C[vi, vk] + A[vi, vj] * B[vj, vk]
+
+
+@T.prim_func
+def csrmm_dense_iter(
+    a: T.handle,
+    b: T.handle,
+    c: T.handle,
+    indptr: T.handle,
+    indices: T.handle,
+    n: T.int32,
+    m: T.int32,
+    k: T.int32,
+    nnz: T.int32,
+) -> None:
+    I = T.dense_fixed(n)
+    J = T.sparse_variable((m, n + 1, nnz), (indptr, indices), "int32")
+    K = T.dense_fixed(k)
+    A = T.match_sparse_buffer(a, (I, J), nnz, "float32")
+    B = T.match_sparse_buffer(b, (T.dense(J), K), m * k, "float32")
+    C = T.match_sparse_buffer(c, (I, K), n * k, "float32")
+    with T.iter([I, T.dense(J), K], "SRS", "csrmm") as [vi, vj, vk]:
         with T.init():
             C[vi, vk] = 0.0
         C[vi, vk] = C[vi, vk] + A[vi, vj] * B[vj, vk]
@@ -233,6 +254,7 @@ def lowered_ellpack_mm(a: T.handle, b: T.handle, c: T.handle, indices: T.handle,
             C_data[(vi * blk + vbi) * feat_size + vf] = C_data[(vi * blk + vbi) * feat_size + vf] + A_data[((vi *
                                                                                                              col + vj) * blk + vbi) * blk + vbj] * B_data[(J_indices[vi * col + vj] * blk + vbj) * feat_size + vf]
 
+
 @T.prim_func
 def csr_element_wise(
     a: T.handle,
@@ -299,6 +321,18 @@ def test_csrmm():
     Y_nd = tvm.nd.array(y.reshape(-1), device=ctx)
     f(A_data, X_nd, Y_nd, A_indptr, A_indices)
     tvm.testing.assert_allclose(y_ground_truth.reshape(-1), Y_nd.numpy(), rtol=1e-5, atol=1e-5)
+
+
+def test_csrmm_dense_iter():
+    mod = tvm.IRModule.from_expr(csrmm_dense_iter)
+    t = AxisTree({
+        "J": "I",
+        "I": None,
+        "K": None
+    })
+    mod = tvm.tir.transform.LowerSparseTIR(t)(mod)
+    print(mod["main"].script())
+    # tvm.ir.assert_structural_equal(mod["main"], lowered_csrmm, True)
 
 
 def test_csr_reduce():
@@ -456,6 +490,7 @@ def test_csr_element_wise():
 
 if __name__ == "__main__":
     test_csrmm()
+    test_csrmm_dense_iter()
     test_csr_reduce()
     test_bsrmm()
     test_ellpack_mm()

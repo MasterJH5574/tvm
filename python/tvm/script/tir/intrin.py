@@ -28,6 +28,8 @@ from tvm.tir.sparse import (
     SpIterVar,
     SparseFixedAxis,
     SparseVariableAxis,
+    DenseFromSparseAxis,
+    FusedAxis
 )
 from ..registry import register
 from ..utils import get_param_list, tvm_span_from_synr
@@ -263,6 +265,11 @@ def comm_reducer(lambda_io, identities, span):
 @register
 def dense(axis: Axis, span: Optional[Span] = None):
     if isinstance(axis, (SparseFixedAxis, SparseVariableAxis)):
-        return DenseFixedAxis(axis.name + "_dense", axis.length, axis)
+        return DenseFromSparseAxis(axis)
     else:
         return axis
+
+
+@register
+def fuse(group: List[Axis], span: Optional[Span] = None):
+    return [FusedAxis(group, _) for _ in range(len(group))]
