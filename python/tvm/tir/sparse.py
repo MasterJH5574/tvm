@@ -42,6 +42,10 @@ class Axis(Object):
     @property
     def idtype(self):
         return _ffi_api.GetAxisIndexType(self)
+    
+    @property
+    def nnz(self):
+        return _ffi_api.GetNNZ(self)
 
 
 @tvm._ffi.register_object("tir.sparse.DenseAxis")
@@ -117,6 +121,9 @@ class DenseVariableAxis(DenseAxis):
     ----------
     name : str
         The name of the axis
+    
+    parent : Axis
+        The parent axis
 
     length : PrimExpr
         The length of the axis
@@ -126,13 +133,14 @@ class DenseVariableAxis(DenseAxis):
     """
 
     name: str
+    parent: Axis
     length: PrimExpr
     nnz: PrimExpr
     indptr: Buffer
 
-    def __init__(self, name, length, nnz, indptr):
+    def __init__(self, name, parent, length, nnz, indptr):
         self.__init_handle_by_constructor__(
-            _ffi_api.DenseVariableAxis, name, length, nnz, indptr  # type: ignore
+            _ffi_api.DenseVariableAxis, name, parent, length, nnz, indptr  # type: ignore
         )
 
 
@@ -145,6 +153,9 @@ class SparseFixedAxis(DenseAxis):
     name : str
         The name of the axis
 
+    parent : Axis
+        The parent axis
+
     length : PrimExpr
         The length of the axis
 
@@ -156,13 +167,14 @@ class SparseFixedAxis(DenseAxis):
     """
 
     name: str
+    parent: Axis
     length: PrimExpr
     indices: Buffer
     nnz_cols: PrimExpr
 
-    def __init__(self, name, length, indices, nnz_cols):
+    def __init__(self, name, parent, length, indices, nnz_cols):
         self.__init_handle_by_constructor__(
-            _ffi_api.SparseFixedAxis, name, length, indices, nnz_cols  # type: ignore
+            _ffi_api.SparseFixedAxis, name, parent, length, indices, nnz_cols  # type: ignore
         )
 
 
@@ -174,6 +186,9 @@ class SparseVariableAxis(DenseAxis):
     ----------
     name : str
         The name of the axis
+    
+    parent : Axis
+        The parent axis
 
     length : PrimExpr
         The length of the axis
@@ -186,33 +201,14 @@ class SparseVariableAxis(DenseAxis):
     """
 
     name: str
+    parent: Axis
     length: PrimExpr
     indptr: Buffer
     indices: Buffer
 
-    def __init__(self, name, length, indptr, indices):
+    def __init__(self, name, parent, length, indptr, indices):
         self.__init_handle_by_constructor__(
-            _ffi_api.SparseVariableAxis, name, length, indptr, indices  # type: ignore
-        )
-
-
-@tvm._ffi.register_object("tir.sparse.AxisTree")
-class AxisTree(Object):
-    """AxisTree node
-
-    Parameters
-    ----------
-    axis_parent_map: Dict
-        A dictionary that maps axis name to parent axis name, value is None if there is not parent axis.
-    """
-
-    axis_parent_map: Dict[str, Optional[str]]
-
-    def __init__(self, axis_parent_map) -> None:
-        keys = list(axis_parent_map.keys())
-        values = list(axis_parent_map.values())
-        self.__init_handle_by_constructor__(
-            _ffi_api.AxisTree, keys, values  # type:ignore
+            _ffi_api.SparseVariableAxis, name, parent, length, indptr, indices  # type: ignore
         )
 
 

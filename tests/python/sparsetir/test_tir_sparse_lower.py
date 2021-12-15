@@ -20,7 +20,6 @@ import tvm.tir as tir
 import scipy.sparse as sp
 import numpy as np
 from tvm.script import tir as T
-from tvm.tir.sparse import AxisTree
 
 
 @T.prim_func
@@ -36,11 +35,11 @@ def csrmm(
     nnz: T.int32,
 ) -> None:
     I = T.dense_fixed(n)
-    J = T.sparse_variable((m, n + 1, nnz), (indptr, indices), "int32")
+    J = T.sparse_variable(I, (m, nnz), (indptr, indices), "int32")
     K = T.dense_fixed(k)
-    A = T.match_sparse_buffer(a, (I, J), nnz, "float32")
-    B = T.match_sparse_buffer(b, (T.dense(J), K), m * k, "float32")
-    C = T.match_sparse_buffer(c, (I, K), n * k, "float32")
+    A = T.match_sparse_buffer(a, (I, J), "float32")
+    B = T.match_sparse_buffer(b, (T.dense(J), K), "float32")
+    C = T.match_sparse_buffer(c, (I, K), "float32")
     with T.iter([I, J, K], "SRS", "csrmm") as [vi, vj, vk]:
         with T.init():
             C[vi, vk] = 0.0
@@ -60,15 +59,33 @@ def csrmm_dense_iter(
     nnz: T.int32,
 ) -> None:
     I = T.dense_fixed(n)
-    J = T.sparse_variable((m, n + 1, nnz), (indptr, indices), "int32")
+    J = T.sparse_variable(I, (m, nnz), (indptr, indices), "int32")
     K = T.dense_fixed(k)
-    A = T.match_sparse_buffer(a, (I, J), nnz, "float32")
-    B = T.match_sparse_buffer(b, (T.dense(J), K), m * k, "float32")
-    C = T.match_sparse_buffer(c, (I, K), n * k, "float32")
+    A = T.match_sparse_buffer(a, (I, J), "float32")
+    B = T.match_sparse_buffer(b, (T.dense(J), K), "float32")
+    C = T.match_sparse_buffer(c, (I, K), "float32")
     with T.iter([I, T.dense(J), K], "SRS", "csrmm") as [vi, vj, vk]:
         with T.init():
             C[vi, vk] = 0.0
         C[vi, vk] = C[vi, vk] + A[vi, vj] * B[vj, vk]
+
+
+@T.prim_func
+def segment_reduce(
+    a: T.handle,
+    b: T.handle,
+    indptr: T.handle,
+    n: T.int32,
+    nnz: T.int32,
+) -> None:
+    I = T.dense_fixed(n)
+    J = T.dense_variable(I, (100, nnz), indptr, "int32")
+    A = T.match_sparse_buffer(a, (I, J), "float32")
+    B = T.match_sparse_buffer(b, (I,), "float32")
+    with T.iter([I, J], "SR", "segment_reduce") as [vi, vj]:
+        with T.init():
+            B[vi] = 0.
+        B[vi] = B[vi] + A[vi, vj]
 
 
 @T.prim_func
@@ -109,9 +126,9 @@ def csr_reduce(
     nnz: T.int32,
 ) -> None:
     I = T.dense_fixed(n)
-    J = T.sparse_variable((m, n + 1, nnz), (indptr, indices), "int32")
-    A = T.match_sparse_buffer(a, (I, J), nnz, "float32")
-    B = T.match_sparse_buffer(b, (I,), n, "float32")
+    J = T.sparse_variable(I, (m, nnz), (indptr, indices), "int32")
+    A = T.match_sparse_buffer(a, (I, J), "float32")
+    B = T.match_sparse_buffer(b, (I,), "float32")
     with T.iter([I, J], "SR", "csr_reduce") as [vi, vj]:
         with T.init():
             B[vi] = 0.0
@@ -155,13 +172,13 @@ def bsrmm(
     feat_size: T.int32,
 ) -> None:
     I = T.dense_fixed(nb)
-    J = T.sparse_variable((mb, nb + 1, nnzb), (indptr, indices), "int32")
+    J = T.sparse_variable(I, (mb, nnzb), (indptr, indices), "int32")
     BI = T.dense_fixed(blk)
     BJ = T.dense_fixed(blk)
     F = T.dense_fixed(feat_size)
-    A = T.match_sparse_buffer(a, (I, J, BI, BJ), nnzb * blk * blk, "float32")
-    B = T.match_sparse_buffer(b, (T.dense(J), BJ, F), mb * blk * feat_size, "float32")
-    C = T.match_sparse_buffer(c, (I, BI, F), nb * blk * feat_size, "float32")
+    A = T.match_sparse_buffer(a, (I, J, BI, BJ), "float32")
+    B = T.match_sparse_buffer(b, (T.dense(J), BJ, F), "float32")
+    C = T.match_sparse_buffer(c, (I, BI, F), "float32")
 
     with T.iter([I, J, BI, BJ, F], "SRSRS", "bsrmm") as [
         vi,
@@ -211,18 +228,17 @@ def ellpack_mm(
     nb: T.int32,
     mb: T.int32,
     feat_size: T.int32,
-    nnz: T.int32,
     col: T.int32,
     blk: T.int32,
 ) -> None:
     I = T.dense_fixed(nb)
-    J = T.sparse_fixed((mb, nnz, col), indices, "int32")
+    J = T.sparse_fixed(I, (mb, col), indices, "int32")
     F = T.dense_fixed(feat_size)
     BI = T.dense_fixed(blk)
     BJ = T.dense_fixed(blk)
-    A = T.match_sparse_buffer(a, (I, J, BI, BJ), nnz * blk * blk, "float32")
-    B = T.match_sparse_buffer(b, (T.dense(J), BJ, F), mb * blk * feat_size, "float32")
-    C = T.match_sparse_buffer(c, (I, BI, F), nb * blk * feat_size, "float32")
+    A = T.match_sparse_buffer(a, (I, J, BI, BJ), "float32")
+    B = T.match_sparse_buffer(b, (T.dense(J), BJ, F), "float32")
+    C = T.match_sparse_buffer(c, (I, BI, F), "float32")
 
     with T.iter([I, J, BI, BJ, F], "SRSRS", "ellmm") as [
         vi,
@@ -237,22 +253,22 @@ def ellpack_mm(
 
 
 @T.prim_func
-def lowered_ellpack_mm(a: T.handle, b: T.handle, c: T.handle, indices: T.handle, nb: T.int32, mb: T.int32, feat_size: T.int32, nnz: T.int32, col: T.int32, blk: T.int32) -> None:
-    A_data = T.match_buffer(a, [nnz * blk * blk], dtype="float32")
+def lowered_ellpack_mm(a: T.handle, b: T.handle, c: T.handle, indices: T.handle, nb: T.int32, mb: T.int32, feat_size: T.int32, col: T.int32, blk: T.int32) -> None:
+    A_data = T.match_buffer(a, [nb * col * blk * blk], dtype="float32")
     B_data = T.match_buffer(b, [mb * blk * feat_size], dtype="float32")
     C_data = T.match_buffer(c, [nb * blk * feat_size], dtype="float32")
-    J_indices = T.match_buffer(indices, [nnz], dtype="int32")
+    J_indices = T.match_buffer(indices, [nb * col], dtype="int32")
+    # body
+    # with T.block("root")
     for v_vi, v_vj, v_vbi, v_vbj, v_vf in T.grid(nb, col, blk, blk, feat_size):
         with T.block("ellmm"):
             vi, vj, vbi, vbj, vf = T.axis.remap("SRSRS", [v_vi, v_vj, v_vbi, v_vbj, v_vf])
-            T.reads([J_indices[0: nnz], A_data[0: nnz * blk * blk],
-                    B_data[0: mb * blk * feat_size], C_data[0: nb * blk * feat_size]])
-            T.writes([C_data[0: nb * blk * feat_size]])
-            T.block_attr({"sparse": True})
+            T.reads([J_indices[0 : nb * col], A_data[0 : nb * col * blk * blk], B_data[0 : mb * blk * feat_size], C_data[0 : nb * blk * feat_size]])
+            T.writes([C_data[0 : nb * blk * feat_size]])
+            T.block_attr({"sparse":True})
             with T.init():
                 C_data[(vi * blk + vbi) * feat_size + vf] = T.float32(0)
-            C_data[(vi * blk + vbi) * feat_size + vf] = C_data[(vi * blk + vbi) * feat_size + vf] + A_data[((vi *
-                                                                                                             col + vj) * blk + vbi) * blk + vbj] * B_data[(J_indices[vi * col + vj] * blk + vbj) * feat_size + vf]
+            C_data[(vi * blk + vbi) * feat_size + vf] = C_data[(vi * blk + vbi) * feat_size + vf] + A_data[((vi * col + vj) * blk + vbi) * blk + vbj] * B_data[(J_indices[vi * col + vj] * blk + vbj) * feat_size + vf]
 
 
 @T.prim_func
@@ -266,9 +282,9 @@ def csr_element_wise(
     nnz: T.int32,
 ) -> None:
     I = T.dense_fixed(m)
-    J = T.sparse_variable((n, m + 1, nnz), (indptr, indices), "int32")
-    A = T.match_sparse_buffer(a, (I, J), nnz, "float32")
-    B = T.match_sparse_buffer(b, (I, J), nnz, "float32")
+    J = T.sparse_variable(I, (n, nnz), (indptr, indices), "int32")
+    A = T.match_sparse_buffer(a, (I, J), "float32")
+    B = T.match_sparse_buffer(b, (I, J), "float32")
 
     with T.iter([I, J], "SS", "csr_element_wise") as [vi, vj]:
         B[vi, vj] = A[vi, vj] * 2.5
@@ -297,12 +313,8 @@ def lowered_csr_element_wise(a: T.handle, b: T.handle, indptr: T.handle, indices
 
 def test_csrmm():
     mod = tvm.IRModule.from_expr(csrmm)
-    t = AxisTree({
-        "J": "I",
-        "I": None,
-        "K": None
-    })
-    mod = tvm.tir.transform.LowerSparseTIR(t)(mod)
+    mod = tvm.tir.transform.LowerSparseTIR()(mod)
+    print(mod["main"].script())
     tvm.ir.assert_structural_equal(mod["main"], lowered_csrmm, True)
 
     A = sp.random(512, 512, dtype="float32", density=0.0125, format="csr")
@@ -325,23 +337,20 @@ def test_csrmm():
 
 def test_csrmm_dense_iter():
     mod = tvm.IRModule.from_expr(csrmm_dense_iter)
-    t = AxisTree({
-        "J": "I",
-        "I": None,
-        "K": None
-    })
-    mod = tvm.tir.transform.LowerSparseTIR(t)(mod)
+    mod = tvm.tir.transform.LowerSparseTIR()(mod)
     print(mod["main"].script())
     # tvm.ir.assert_structural_equal(mod["main"], lowered_csrmm, True)
 
 
+def test_segment_reduce():
+    mod = tvm.IRModule.from_expr(segment_reduce)
+    mod = tvm.tir.transform.LowerSparseTIR()(mod)
+    print(mod["main"].script())
+
+
 def test_csr_reduce():
     mod = tvm.IRModule.from_expr(csr_reduce)
-    t = AxisTree({
-        "J": "I",
-        "I": None
-    })
-    mod = tvm.tir.transform.LowerSparseTIR(t)(mod)
+    mod = tvm.tir.transform.LowerSparseTIR()(mod)
     tvm.ir.assert_structural_equal(mod["main"], lowered_csr_reduce, True)
 
     A = sp.random(128, 128, dtype="float32", density=0.0125, format="csr")
@@ -362,14 +371,7 @@ def test_csr_reduce():
 
 def test_bsrmm():
     mod = tvm.IRModule.from_expr(bsrmm)
-    t = AxisTree({
-        "J": "I",
-        "I": None,
-        "BJ": None,
-        "BI": None,
-        "F": None
-    })
-    mod = tvm.tir.transform.LowerSparseTIR(t)(mod)
+    mod = tvm.tir.transform.LowerSparseTIR()(mod)
     tvm.ir.assert_structural_equal(mod["main"], lowered_bsrmm, True)
 
     block_size = 16
@@ -409,14 +411,8 @@ def test_bsrmm():
 
 def test_ellpack_mm():
     mod = tvm.IRModule.from_expr(ellpack_mm)
-    t = AxisTree({
-        "J": "I",
-        "I": None,
-        "F": None,
-        "BI": None,
-        "BJ": None
-    })
-    mod = tvm.tir.transform.LowerSparseTIR(t)(mod)
+    mod = tvm.tir.transform.LowerSparseTIR()(mod)
+    print(mod["main"].script())
     tvm.ir.assert_structural_equal(mod["main"], lowered_ellpack_mm, True)
 
     nnz_cols = 4
@@ -439,14 +435,13 @@ def test_ellpack_mm():
     y_ground_truth = A * x
     y = np.zeros((n * feat_size,)).astype("float32")
 
-    v_nb, v_mb, v_feat_size, v_nnz, v_col, v_blk = ellpack_mm.params[-6:]
+    v_nb, v_mb, v_feat_size, v_col, v_blk = ellpack_mm.params[-5:]
     f = tvm.build(
         mod["main"].specialize(
             {
                 v_nb: nb,
                 v_mb: mb,
                 v_feat_size: feat_size,
-                v_nnz: nnz,
                 v_col: nnz_cols,
                 v_blk: block_size,
             }
@@ -465,11 +460,7 @@ def test_ellpack_mm():
 
 def test_csr_element_wise():
     mod = tvm.IRModule.from_expr(csr_element_wise)
-    t = AxisTree({
-        "J": "I",
-        "I": None
-    })
-    mod = tvm.tir.transform.LowerSparseTIR(t)(mod)
+    mod = tvm.tir.transform.LowerSparseTIR()(mod)
     tvm.ir.assert_structural_equal(mod["main"], lowered_csr_element_wise, True)
 
     A = sp.random(128, 128, dtype="float32", density=0.0125, format="csr")
@@ -491,6 +482,7 @@ def test_csr_element_wise():
 if __name__ == "__main__":
     test_csrmm()
     test_csrmm_dense_iter()
+    test_segment_reduce()
     test_csr_reduce()
     test_bsrmm()
     test_ellpack_mm()

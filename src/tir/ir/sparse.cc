@@ -43,6 +43,8 @@ TVM_REGISTER_GLOBAL("tir.sparse.GetAxisIndexType").set_body_typed([](Axis axis) 
   return DLDataType2String(axis->GetIndexType());
 });
 
+TVM_REGISTER_GLOBAL("tir.sparse.GetNNZ").set_body_typed([](Axis axis) { return axis->nnz(); });
+
 /******** DenseFixedAxis ********/
 
 /*! \brief Default constructor of DenseFixedAxis */
@@ -68,9 +70,11 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
 /******** DenseVariableAxis ********/
 
 /*! \brief Default constuctor of DenseVariableAxis */
-DenseVariableAxis::DenseVariableAxis(String name, PrimExpr length, PrimExpr nnz, Buffer indptr) {
+DenseVariableAxis::DenseVariableAxis(String name, Axis parent, PrimExpr length, PrimExpr nnz,
+                                     Buffer indptr) {
   ObjectPtr<DenseVariableAxisNode> node = make_object<DenseVariableAxisNode>();
   node->name = std::move(name);
+  node->parent_ = std::move(parent);
   node->length = std::move(length);
   node->nnz_ = std::move(nnz);
   node->indptr = std::move(indptr);
@@ -80,8 +84,9 @@ DenseVariableAxis::DenseVariableAxis(String name, PrimExpr length, PrimExpr nnz,
 TVM_REGISTER_NODE_TYPE(DenseVariableAxisNode);
 
 TVM_REGISTER_GLOBAL("tir.sparse.DenseVariableAxis")
-    .set_body_typed([](String name, PrimExpr length, PrimExpr nnz, Buffer indptr) {
-      return DenseVariableAxis(std::move(name), std::move(length), std::move(nnz), std::move(indptr));
+    .set_body_typed([](String name, Axis parent, PrimExpr length, PrimExpr nnz, Buffer indptr) {
+      return DenseVariableAxis(std::move(name), std::move(parent), std::move(length),
+                               std::move(nnz), std::move(indptr));
     });
 
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
@@ -161,9 +166,11 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
 /******** SparseFixedAxis ********/
 
 /*! \brief Default constructor of SparseFixedAxis */
-SparseFixedAxis::SparseFixedAxis(String name, PrimExpr length, Buffer indices, PrimExpr nnz_cols) {
+SparseFixedAxis::SparseFixedAxis(String name, Axis parent, PrimExpr length, Buffer indices,
+                                 PrimExpr nnz_cols) {
   ObjectPtr<SparseFixedAxisNode> node = make_object<SparseFixedAxisNode>();
   node->name = std::move(name);
+  node->parent_ = std::move(parent);
   node->length = std::move(length);
   node->indices = std::move(indices);
   node->nnz_cols = std::move(nnz_cols);
@@ -173,24 +180,27 @@ SparseFixedAxis::SparseFixedAxis(String name, PrimExpr length, Buffer indices, P
 TVM_REGISTER_NODE_TYPE(SparseFixedAxisNode);
 
 TVM_REGISTER_GLOBAL("tir.sparse.SparseFixedAxis")
-    .set_body_typed([](String name, PrimExpr length, Buffer indices, PrimExpr nnz_cols) {
-      return SparseFixedAxis(std::move(name), std::move(length), std::move(indices), std::move(nnz_cols));
+    .set_body_typed([](String name, Axis parent, PrimExpr length, Buffer indices,
+                       PrimExpr nnz_cols) {
+      return SparseFixedAxis(std::move(name), std::move(parent), std::move(length),
+                             std::move(indices), std::move(nnz_cols));
     });
 
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
     .set_dispatch<SparseFixedAxisNode>([](const ObjectRef& node, ReprPrinter* p) {
       auto* op = static_cast<const SparseFixedAxisNode*>(node.get());
-      p->stream << "sparse_fixed(" << op->name << ", " << op->length << ", " << op->nnz_cols << ", "
-                << op->indices->name << ")";
+      p->stream << "sparse_fixed(" << op->name << ", " << op->GetParentAxis().value()->name << ", "
+                << op->length << ", " << op->nnz_cols << ", " << op->indices->name << ")";
     });
 
 /******** SparseVariableAxis ********/
 
 /*! \brief Default constructor of SparseVariableAxis */
-SparseVariableAxis::SparseVariableAxis(String name, PrimExpr length, Buffer indptr,
+SparseVariableAxis::SparseVariableAxis(String name, Axis parent, PrimExpr length, Buffer indptr,
                                        Buffer indices) {
   ObjectPtr<SparseVariableAxisNode> node = make_object<SparseVariableAxisNode>();
   node->name = std::move(name);
+  node->parent_ = std::move(parent);
   node->length = std::move(length);
   node->indptr = std::move(indptr);
   node->indices = std::move(indices);
@@ -200,8 +210,9 @@ SparseVariableAxis::SparseVariableAxis(String name, PrimExpr length, Buffer indp
 TVM_REGISTER_NODE_TYPE(SparseVariableAxisNode);
 
 TVM_REGISTER_GLOBAL("tir.sparse.SparseVariableAxis")
-    .set_body_typed([](String name, PrimExpr length, Buffer indptr, Buffer indices) {
-      return SparseVariableAxis(std::move(name), std::move(length), std::move(indptr), std::move(indices));
+    .set_body_typed([](String name, Axis parent, PrimExpr length, Buffer indptr, Buffer indices) {
+      return SparseVariableAxis(std::move(name), std::move(parent), std::move(length),
+                                std::move(indptr), std::move(indices));
     });
 
 TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
@@ -209,48 +220,6 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
       auto* op = static_cast<const SparseVariableAxisNode*>(node.get());
       p->stream << "sparse_variable(" << op->name << ", " << op->length << ", " << op->indptr->name
                 << ", " << op->indices->name << ")";
-    });
-
-/******** AxisTree ********/
-
-/*! \brief Default constructor of AxisTree */
-AxisTree::AxisTree(Array<String> axis_names, Array<Optional<String>> axis_parent_names) {
-  CHECK_EQ(axis_names.size(), axis_parent_names.size())
-      << "ValueError: The axis_names array should have the same length as "
-         "axis_parent_names "
-         "array.";
-  ObjectPtr<AxisTreeNode> node = make_object<AxisTreeNode>();
-  Map<String, String> parent;
-  Map<String, Array<String>> children;
-  for (size_t i = 0; i < axis_names.size(); i++) {
-    // update parent map & children map
-    String axis_name = axis_names[i];
-    String parent_name("root");
-    if (axis_parent_names[i].defined()) {
-      parent_name = axis_parent_names[i].value();
-    }
-    parent.Set(axis_name, parent_name);
-
-    auto it = children.find(parent_name);
-    if (it != children.end()) {
-      Array<String> value = (*it).second;
-      value.push_back(axis_name);
-      children.Set(parent_name, std::move(value));
-    } else {
-      Array<String> value{axis_name};
-      children.Set(parent_name, std::move(value));
-    }
-  }
-  node->parent = std::move(parent);
-  node->children = std::move(children);
-  data_ = std::move(node);
-}
-
-TVM_REGISTER_NODE_TYPE(AxisTreeNode);
-
-TVM_REGISTER_GLOBAL("tir.sparse.AxisTree")
-    .set_body_typed([](Array<String> axis_names, Array<Optional<String>> axis_parent_names) {
-      return AxisTree(std::move(axis_names), std::move(axis_parent_names));
     });
 
 /******** SparseBuffer ********/

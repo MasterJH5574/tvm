@@ -19,7 +19,6 @@ import tvm.tir as tir
 import scipy.sparse as sp
 import numpy as np
 from tvm.script import tir as T
-from tvm.tir.sparse import AxisTree
 
 @T.prim_func
 def csr2bsr_cnt_nnz(
@@ -27,9 +26,9 @@ def csr2bsr_cnt_nnz(
     new_cord: T.handle, glb_counter: T.handle,
     n: T.int32, m: T.int32, nnz: T.int32) -> None:
     I = T.dense_fixed(n)
-    J = T.sparse_variable((m, n + 1, nnz), (indptr, indices), "int32")
+    J = T.sparse_variable(I, (m, nnz), (indptr, indices), "int32")
     K = T.dense_fixed(2)
-    New_cord = T.match_sparse_buffer(new_cord, (I, J, K), nnz * 2, "int32")
+    New_cord = T.match_sparse_buffer(new_cord, (I, J, K), "int32")
     with T.iter([I, J], "SS", "csr2bsr_cnt_nnz") as [vi, vj]:
         New_cord[vi, vj, 0] = 0
         New_cord[vi, vj, 1] = 1
@@ -42,13 +41,13 @@ def csr2bsr(indptr_1: T.handle, indices_1: T.handle, indptr_2: T.handle, indices
     n: T.int32, m: T.int32, nnz: T.int32,
     nb: T.int32, mb: T.int32, nnzb: T.int32) -> None:
     I = T.dense_fixed(n)
-    J = T.sparse_variable((m, n + 1, nnz), (indptr_1, indices_1), "int32")
+    J = T.sparse_variable(I, (m, nnz), (indptr_1, indices_1), "int32")
     Ibo = T.dense_fixed(nb)
-    Jbo = T.sparse_variable((mb, nb + 1, nnzb), (indptr_2, indices_2), "int32")
+    Jbo = T.sparse_variable(Ibo, (mb, nnzb), (indptr_2, indices_2), "int32")
     Ibi = T.dense_fixed(block_size)
     Jbi = T.dense_fixed(block_size)
-    A_csr = T.match_sparse_buffer(a_csr, (I, J), nnz, "float32")
-    A_bsr = T.match_sparse_buffer(a_bsr, (Ibo, Jbo, Ibi, Jbi), nnzb * block_size * block_size, "float32")
+    A_csr = T.match_sparse_buffer(a_csr, (I, J), "float32")
+    A_bsr = T.match_sparse_buffer(a_bsr, (Ibo, Jbo, Ibi, Jbi), "float32")
     with T.iter([I, J], "SS", "csr2bsrm") as [vi, vj]:
         A_bsr[T.floordiv(vi, block_size), T.floordiv(vj, block_size), T.floormod(vi, block_size), T.floormod(vj, block_size)] =\
             A_csr[vi, vj]
@@ -56,27 +55,13 @@ def csr2bsr(indptr_1: T.handle, indices_1: T.handle, indptr_2: T.handle, indices
 
 def test_cnt_nnz():
     mod = tvm.IRModule.from_expr(csr2bsr_cnt_nnz)
-    t = AxisTree({
-        "J": "I",
-        "I": None,
-        "K": None
-    })
-    mod = tvm.tir.transform.LowerSparseTIR(t)(mod)
+    mod = tvm.tir.transform.LowerSparseTIR()(mod)
     print(mod['main'].script())
 
 
 def test_csr2bsr():
     mod = tvm.IRModule.from_expr(csr2bsr)
-    t = AxisTree({
-        "J": "I",
-        "I": None,
-        "K": None,
-        "Ibo": None,
-        "Jbo": "Ibo",
-        "Ibi": None,
-        "Ibo": None,
-    })
-    mod = tvm.tir.transform.LowerSparseTIR(t)(mod)
+    mod = tvm.tir.transform.LowerSparseTIR()(mod)
     print(mod['main'].script())
 
 

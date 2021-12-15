@@ -100,7 +100,7 @@ SparseBlock SparseReorder(ScheduleState self, const SparseBlock& block,
   CheckValidInputIterators(self, new_order, block->sp_iter_vars);
 
   // Step 2. Check whether the new order does not break the iterator dependency.
-  // TODO(zihao): use axis dependency tree instead
+  // TODO(zihao): rewrite this part.
   // CheckDependency(self, block, new_order);
 
   // Step 3. Create the new SparseBlock.

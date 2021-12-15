@@ -40,6 +40,8 @@ enum class AxisKind : int {
   kSparseVariable = 3
 };
 
+class Axis;
+
 /*!
  * \brief Base type for axis in sparse formats.
  */
@@ -73,6 +75,7 @@ class AxisNode : public Object {
   String GetName() const { return name; }
   PrimExpr GetLength() const { return length; }
   DataType GetIndexType() const { return length->dtype; }
+  virtual Optional<Axis> GetParentAxis() const = 0;
 
   virtual AxisKind kind() const = 0;
   virtual PrimExpr nnz() const = 0;
@@ -136,6 +139,8 @@ class DenseFixedAxisNode : public DenseAxisNode {
   AxisKind kind() const final { return AxisKind::kDenseFixed; }
 
   PrimExpr nnz() const final { return length; }
+
+  Optional<Axis> GetParentAxis() const final { return NullOpt; }
 
   static constexpr const char* _type_key = "tir.sparse.DenseFixedAxis";
   TVM_DECLARE_BASE_OBJECT_INFO(DenseFixedAxisNode, DenseAxisNode);
@@ -238,6 +243,7 @@ class DenseVariableAxisNode : public DenseAxisNode {
  public:
   Buffer indptr;
   PrimExpr nnz_;
+  Axis parent_;
 
   void VisitAttrs(AttrVisitor* v) {
     DenseAxisNode::VisitAttrs(v);
@@ -257,6 +263,8 @@ class DenseVariableAxisNode : public DenseAxisNode {
 
   PrimExpr nnz() const final { return nnz_; }
 
+  Optional<Axis> GetParentAxis() const final { return parent_; }
+
   static constexpr const char* _type_key = "tir.sparse.DenseVariableAxis";
   TVM_DECLARE_FINAL_OBJECT_INFO(DenseVariableAxisNode, DenseAxisNode);
 };
@@ -267,7 +275,8 @@ class DenseVariableAxisNode : public DenseAxisNode {
  */
 class DenseVariableAxis : public DenseAxis {
  public:
-  TVM_DLL explicit DenseVariableAxis(String name, PrimExpr length, PrimExpr nnz, Buffer indptr);
+  TVM_DLL explicit DenseVariableAxis(String name, Axis parent, PrimExpr length, PrimExpr nnz,
+                                     Buffer indptr);
 
   TVM_DEFINE_OBJECT_REF_METHODS(DenseVariableAxis, DenseAxis, DenseVariableAxisNode);
 };
@@ -280,6 +289,7 @@ class SparseFixedAxisNode : public SparseAxisNode {
   Buffer indices;
   /* fixed number of non-zero columns of current sparse axis. */
   PrimExpr nnz_cols;
+  Axis parent_;
 
   void VisitAttrs(AttrVisitor* v) {
     SparseAxisNode::VisitAttrs(v);
@@ -302,6 +312,8 @@ class SparseFixedAxisNode : public SparseAxisNode {
 
   AxisKind kind() const final { return AxisKind::kSparseFixed; }
 
+  Optional<Axis> GetParentAxis() const final { return parent_; }
+
   static constexpr const char* _type_key = "tir.sparse.SparseFixedAxis";
   TVM_DECLARE_FINAL_OBJECT_INFO(SparseFixedAxisNode, SparseAxisNode);
 };
@@ -312,7 +324,8 @@ class SparseFixedAxisNode : public SparseAxisNode {
  */
 class SparseFixedAxis : public SparseAxis {
  public:
-  TVM_DLL explicit SparseFixedAxis(String name, PrimExpr length, Buffer indices, PrimExpr nnz_cols);
+  TVM_DLL explicit SparseFixedAxis(String name, Axis parent, PrimExpr length, Buffer indices,
+                                   PrimExpr nnz_cols);
 
   TVM_DEFINE_OBJECT_REF_METHODS(SparseFixedAxis, SparseAxis, SparseFixedAxisNode);
 };
@@ -324,6 +337,7 @@ class SparseVariableAxisNode : public SparseAxisNode {
  public:
   Buffer indptr;
   Buffer indices;
+  Axis parent_;
 
   void VisitAttrs(AttrVisitor* v) {
     SparseAxisNode::VisitAttrs(v);
@@ -346,6 +360,8 @@ class SparseVariableAxisNode : public SparseAxisNode {
 
   AxisKind kind() const final { return AxisKind::kSparseVariable; }
 
+  Optional<Axis> GetParentAxis() const final { return parent_; }
+
   static constexpr const char* _type_key = "tir.sparse.SparseVariableAxis";
   TVM_DECLARE_FINAL_OBJECT_INFO(SparseVariableAxisNode, SparseAxisNode);
 };
@@ -356,50 +372,10 @@ class SparseVariableAxisNode : public SparseAxisNode {
  */
 class SparseVariableAxis : public SparseAxis {
  public:
-  TVM_DLL explicit SparseVariableAxis(String name, PrimExpr length, Buffer indptr, Buffer indices);
+  TVM_DLL explicit SparseVariableAxis(String name, Axis parent, PrimExpr length, Buffer indptr,
+                                      Buffer indices);
 
   TVM_DEFINE_OBJECT_REF_METHODS(SparseVariableAxis, SparseAxis, SparseVariableAxisNode);
-};
-
-/*!
- * \brief Axis Dependency Tree.
- */
-class AxisTreeNode : public Object {
- public:
-  // unordered map that stores the parent relationship between axes.
-  Map<String, String> parent;
-  // unordered map that stores the children relationship between axes.
-  Map<String, Array<String>> children;
-
-  void VisitAttrs(AttrVisitor* v) {
-    v->Visit("parent", &parent);
-    v->Visit("children", &children);
-  }
-
-  bool SEqualReduce(const AxisTreeNode* other, SEqualReducer equal) const {
-    return equal(parent, other->parent) && equal(children, other->children);
-  }
-
-  void SHashReduce(SHashReducer hash_reduce) const {
-    hash_reduce(parent);
-    hash_reduce(children);
-  }
-
-  static constexpr const char* _type_key = "tir.sparse.AxisTree";
-  static constexpr const bool _type_has_method_sequal_reduce = true;
-  static constexpr const bool _type_has_method_shash_reduce = true;
-  TVM_DECLARE_FINAL_OBJECT_INFO(AxisTreeNode, Object);
-};
-
-/*!
- * \brief Managed reference to AxisRefNode.
- * \sa AxisTreeNode
- */
-class AxisTree : public ObjectRef {
- public:
-  TVM_DLL AxisTree(Array<String> axis_names, Array<Optional<String>> axis_parent_names);
-
-  TVM_DEFINE_OBJECT_REF_METHODS(AxisTree, ObjectRef, AxisTreeNode);
 };
 
 /*!
