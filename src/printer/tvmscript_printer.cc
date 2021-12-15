@@ -1321,7 +1321,7 @@ Doc TVMScriptPrinter::PrintSparseBlockName(const SparseBlockNode* op) {
     const SpIterVar& sp_iter = op->sp_iter_vars[i];
     const Axis& axis = sp_iter->axis;
     Doc iter_doc;
-    
+
     std::string axis_repr = sp_iter->axis->name;
     if (axis->is_derived_axis) {
       if (const DenseFromSparseAxisNode* dfs_axis = axis.as<DenseFromSparseAxisNode>()) {
@@ -1399,7 +1399,7 @@ Doc TVMScriptPrinter::PrintSparseStructDefinitions(const SparseBlockNode* sp_blo
       }
 
       doc << "match_sparse_buffer(" << Print(params[0]) << ", (" << axes_doc << "), "
-          << Print(sp_buffer->data->shape[0]) << ", " << PrintDType(sp_buffer->data->dtype) << ")";
+          << PrintDType(sp_buffer->data->dtype) << ")";
       sp_buf_docs.push_back(doc);
       continue;
     }
@@ -1409,20 +1409,19 @@ Doc TVMScriptPrinter::PrintSparseStructDefinitions(const SparseBlockNode* sp_blo
       doc << "dense_fixed(" << Print(df_axis->length) << ")";
     } else if (const auto* dv_axis = obj.as<DenseVariableAxisNode>()) {
       ICHECK_EQ(params.size(), 1);
-      doc << "dense_variable((" << Print(dv_axis->length) << ", "
-          << Print(dv_axis->indptr->shape[0]) << "), " << Print(params[0]) << ", "
+      doc << "dense_variable(" << dv_axis->parent_->name << ", (" << Print(dv_axis->length) << ", "
+          << Print(dv_axis->nnz()) << "), " << Print(params[0]) << ", "
           << PrintDType(dv_axis->indptr->dtype) << ")";
     } else if (const auto* sf_axis = obj.as<SparseFixedAxisNode>()) {
       ICHECK_EQ(params.size(), 1);
-      doc << "sparse_fixed((" << Print(sf_axis->length) << ", " << Print(sf_axis->indices->shape[0])
-          << ", " << Print(sf_axis->nnz_cols) << "), " << Print(params[0]) << ", "
+      doc << "sparse_fixed(" << sf_axis->parent_->name << ", (" << Print(sf_axis->length) << ", "
+          << Print(sf_axis->nnz_cols) << "), " << Print(params[0]) << ", "
           << PrintDType(sf_axis->indices->dtype) << ")";
     } else if (const auto* sv_axis = obj.as<SparseVariableAxisNode>()) {
       ICHECK_EQ(params.size(), 2);
-      doc << "sparse_variable((" << Print(sv_axis->length) << ", "
-          << Print(sv_axis->indptr->shape[0]) << ", " << Print(sv_axis->indices->shape[0]) << "), ("
-          << Print(params[0]) << ", " << Print(params[1]) << "), "
-          << PrintDType(sv_axis->indptr->dtype) << ")";
+      doc << "sparse_variable(" << sv_axis->parent_->name << ", (" << Print(sv_axis->length) << ", "
+          << Print(sv_axis->nnz()) << "), (" << Print(params[0]) << ", " << Print(params[1])
+          << "), " << PrintDType(sv_axis->indptr->dtype) << ")";
     } else {
       ICHECK(false) << "Cannot reach here";
     }

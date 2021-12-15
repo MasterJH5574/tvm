@@ -17,18 +17,12 @@
 import tvm
 import tvm.tir as tir
 
-def test_format_tree_creation():
+def test_axis_creation():
     i = tir.sparse.DenseFixedAxis('i', 128)
     j = tir.sparse.DenseFixedAxis('j', 128)
     k = tir.sparse.DenseFixedAxis('k', 128)
-    tree = tir.sparse.AxisTree({
-        'i': None,
-        'j': None,
-        'k': None
-    })
-    print(tree)
     print(i, j, k)
 
 
 if __name__ == "__main__":
-    test_format_tree_creation()
+    test_axis_creation()

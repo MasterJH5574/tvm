@@ -920,6 +920,7 @@ class DenseVariable(SpecialStmt):
 
     def __init__(self):
         def dense_variable(
+            parent_axis: Axis,
             shape: Tuple[PrimExpr, PrimExpr],
             indptr_var: tvm.tir.Var,
             idtype: str = "int32",
@@ -931,11 +932,12 @@ class DenseVariable(SpecialStmt):
                     f"`dense_variable` expected assign to only one var, but got {names}", span
                 )
 
-            length, indptr_len, nnz = shape
+            length, nnz = shape
+            indptr_len = parent_axis.length + 1
             indptr_buf = tvm.tir.decl_buffer(
                 (indptr_len,), dtype=idtype, name=names[0] + "_indptr", span=span
             )
-            axis = DenseVariableAxis(names[0], length, nnz, indptr_buf)
+            axis = DenseVariableAxis(names[0], parent_axis, length, nnz, indptr_buf)
             self.context.sp_struct.append(axis)
             self.context.sp_struct_params.append([indptr_var])
             self.context.update_symbol(names[0], axis, self.node)
@@ -950,7 +952,8 @@ class SparseFixed(SpecialStmt):
 
     def __init__(self):
         def sparse_fixed(
-            shape: Tuple[PrimExpr, PrimExpr, PrimExpr],
+            parent_axis: Axis,
+            shape: Tuple[PrimExpr, PrimExpr],
             indices_var: tvm.tir.Var,
             idtype: str = "int32",
             span: Optional[Span] = None,
@@ -961,11 +964,12 @@ class SparseFixed(SpecialStmt):
                     f"`sparse_fixed` expected assign to only one var, but got {names}", span
                 )
 
-            length, nnz, nnz_cols = shape
+            length, nnz_cols = shape
+            nnz = parent_axis.nnz * nnz_cols
             indices_buf = tvm.tir.decl_buffer(
                 (nnz,), dtype=idtype, name=names[0] + "_indices", span=span
             )
-            axis = SparseFixedAxis(names[0], length, indices_buf, nnz_cols)
+            axis = SparseFixedAxis(names[0], parent_axis, length, indices_buf, nnz_cols)
             self.context.sp_struct.append(axis)
             self.context.sp_struct_params.append([indices_var])
             self.context.update_symbol(names[0], axis, self.node)
@@ -980,7 +984,8 @@ class SparseVariable(SpecialStmt):
 
     def __init__(self):
         def sparse_variable(
-            shape: Tuple[PrimExpr, PrimExpr, PrimExpr],
+            parent_axis: Axis,
+            shape: Tuple[PrimExpr, PrimExpr],
             data: Tuple[tvm.tir.Var, tvm.tir.Var],
             idtype: str = "int32",
             span: Optional[Span] = None,
@@ -991,7 +996,8 @@ class SparseVariable(SpecialStmt):
                     f"`sparse_variable` expected assign to only one var, but got {names}", span
                 )
 
-            length, indptr_len, nnz = shape
+            length, nnz = shape
+            indptr_len = parent_axis.nnz + 1
             indptr_var, indices_var = data
             indptr_buf = tvm.tir.decl_buffer(
                 (indptr_len,), dtype=idtype, name=names[0] + "_indptr", span=span
@@ -999,7 +1005,7 @@ class SparseVariable(SpecialStmt):
             indices_buf = tvm.tir.decl_buffer(
                 (nnz,), dtype=idtype, name=names[0] + "_indices", span=span
             )
-            axis = SparseVariableAxis(names[0], length, indptr_buf, indices_buf)
+            axis = SparseVariableAxis(names[0], parent_axis, length, indptr_buf, indices_buf)
             self.context.sp_struct.append(axis)
             self.context.sp_struct_params.append([indptr_var, indices_var])
             self.context.update_symbol(names[0], axis, self.node)
@@ -1017,10 +1023,19 @@ class MatchSparseBuffer(SpecialStmt):
         def match_sparse_buffer(
             param: tvm.tir.Var,
             axes: List[Axis],
-            nnz: PrimExpr,
             dtype: str = "float32",
             span: Optional[Span] = None,
         ):
+            def infer_nnz(axes: List[Axis]) -> PrimExpr:
+                """Inference the number of non-zero elements in a sparse buffer."""
+                ret = axes[0].nnz
+                for axis in axes[1:]:
+                    if isinstance(axis, DenseFixedAxis):
+                        ret = ret * axis.nnz
+                    else:
+                        ret = axis.nnz
+                return ret
+
             if not isinstance(self.node, ast.Assign) or not len(self.node.lhs) == 1:
                 self.context.report_error(
                     "`match_sparse_buffer` must be assigned to a single sparse buffer, "
@@ -1035,7 +1050,7 @@ class MatchSparseBuffer(SpecialStmt):
                 )
 
             if param in self.context.func_params:
-                data = tvm.tir.decl_buffer(nnz, dtype, buffer_name + "_data", span=span)
+                data = tvm.tir.decl_buffer(infer_nnz(axes), dtype, buffer_name + "_data", span=span)
                 buffer = tvm.tir.sparse.SparseBuffer(axes, data, buffer_name)
                 self.context.sp_struct.append(buffer)
                 self.context.sp_struct_params.append([param])
