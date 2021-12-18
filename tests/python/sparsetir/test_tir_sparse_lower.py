@@ -40,7 +40,7 @@ def csrmm(
     A = T.match_sparse_buffer(a, (I, J), "float32")
     B = T.match_sparse_buffer(b, (T.dense(J), K), "float32")
     C = T.match_sparse_buffer(c, (I, K), "float32")
-    with T.iter([I, J, K], "SRS", "csrmm") as [vi, vj, vk]:
+    with T.iter([I, K, J], "SSR", "csrmm") as [vi, vk, vj]:
         with T.init():
             C[vi, vk] = 0.0
         C[vi, vk] = C[vi, vk] + A[vi, vj] * B[vj, vk]
@@ -180,12 +180,12 @@ def bsrmm(
     B = T.match_sparse_buffer(b, (T.dense(J), BJ, F), "float32")
     C = T.match_sparse_buffer(c, (I, BI, F), "float32")
 
-    with T.iter([I, J, BI, BJ, F], "SRSRS", "bsrmm") as [
+    with T.iter([I, BI, BJ, F, J], "SSRSR", "bsrmm") as [
         vi,
-        vj,
         vbi,
         vbj,
         vf,
+        vj,
     ]:
         with T.init():
             C[vi, vbi, vf] = 0.0
@@ -314,7 +314,6 @@ def lowered_csr_element_wise(a: T.handle, b: T.handle, indptr: T.handle, indices
 def test_csrmm():
     mod = tvm.IRModule.from_expr(csrmm)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    print(mod["main"].script())
     tvm.ir.assert_structural_equal(mod["main"], lowered_csrmm, True)
 
     A = sp.random(512, 512, dtype="float32", density=0.0125, format="csr")
@@ -338,14 +337,12 @@ def test_csrmm():
 def test_csrmm_dense_iter():
     mod = tvm.IRModule.from_expr(csrmm_dense_iter)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    print(mod["main"].script())
     # tvm.ir.assert_structural_equal(mod["main"], lowered_csrmm, True)
 
 
 def test_segment_reduce():
     mod = tvm.IRModule.from_expr(segment_reduce)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    print(mod["main"].script())
 
 
 def test_csr_reduce():
@@ -412,7 +409,6 @@ def test_bsrmm():
 def test_ellpack_mm():
     mod = tvm.IRModule.from_expr(ellpack_mm)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    print(mod["main"].script())
     tvm.ir.assert_structural_equal(mod["main"], lowered_ellpack_mm, True)
 
     nnz_cols = 4
