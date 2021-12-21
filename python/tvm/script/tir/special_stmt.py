@@ -17,6 +17,7 @@
 """TVM Script Parser Special Stmt Classes"""
 # pylint: disable=unused-argument, no-self-argument, inconsistent-return-statements
 # pylint: disable=relative-beyond-top-level
+from os import name
 from typing import Callable, List, Optional, Tuple, Any, Mapping, Union
 
 import synr
@@ -35,6 +36,7 @@ from tvm.tir.sparse import (
     DenseVariableAxis,
     SparseFixedAxis,
     SparseVariableAxis,
+    AttachedAxis,
 )
 
 from .node import BufferSlice
@@ -944,6 +946,38 @@ class DenseVariable(SpecialStmt):
             self.context.update_symbol(names[0] + "_indptr", indptr_buf, self.node)
 
         super().__init__(dense_variable, def_symbol=True)
+
+
+@register
+class Attach(SpecialStmt):
+    """Special Stmt for attaching axis."""
+    
+    def __init__(self):
+        def attach_axis(
+            parent: Axis,
+            orig: Axis,
+            nnz: PrimExpr,
+            indptr_var: tvm.tir.Var,
+            idtype: str = "int32",
+            span: Optional[Span] = None,
+        ):
+            names = [x.id.name for x in self.node.lhs]
+            if len(names) != 1:
+                self.context.report_error(
+                    f"`attach_axis` expected assign to only one var, but got {names}", span
+                )
+            
+            indptr_len = orig.nnz + 1
+            indptr_buf = tvm.tir.decl_buffer(
+                (indptr_len,), dtype=idtype, name=names[0] + "_indptr", span=span
+            )
+            axis = AttachedAxis(names[0], parent, orig, nnz, indptr_buf)
+            self.context.sp_struct.append(axis)
+            self.context.sp_struct_params.append([indptr_var])
+            self.context.update_symbol(names[0], axis, self.node)
+            self.context.update_symbol(names[0] + "_indptr", indptr_buf, self.node)
+    
+        super().__init__(attach_axis, def_symbol=True)
 
 
 @register

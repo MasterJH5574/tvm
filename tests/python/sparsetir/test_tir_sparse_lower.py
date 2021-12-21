@@ -310,6 +310,40 @@ def lowered_csr_element_wise(a: T.handle, b: T.handle, indptr: T.handle, indices
                     T.block_attr({"sparse": True})
                     B_data[J_indptr[vi] + vj] = A_data[J_indptr[vi] + vj] * T.float32(2.5)
 
+@T.prim_func
+def bmm(
+    x: T.handle,
+    y: T.handle,
+    z: T.handle,
+    indptr_i: T.handle,
+    indptr_j: T.handle,
+    indptr_k: T.handle,
+    indptr_ij: T.handle,
+    indptr_jk: T.handle,
+    indptr_ik: T.handle,
+    batch_size: T.int32,
+    nnz_i: T.int32,
+    nnz_j: T.int32,
+    nnz_k: T.int32,
+    nnz_ij: T.int32,
+    nnz_jk: T.int32,
+    nnz_ik: T.int32
+) -> None:
+    B = T.dense_fixed(batch_size)
+    I = T.dense_variable(B, (32768, nnz_i), indptr_i, "int32")
+    J = T.dense_variable(B, (32768, nnz_j), indptr_j, "int32")
+    K = T.dense_variable(B, (32768, nnz_k), indptr_k, "int32")
+    IJ = T.attach_axis(I, J, nnz_ij, indptr_ij, "int32")
+    JK = T.attach_axis(J, K, nnz_jk, indptr_jk, "int32")
+    IK = T.attach_axis(I, K, nnz_ik, indptr_ik, "int32")
+    X = T.match_sparse_buffer(x, (B, I, IJ), "float32")
+    Y = T.match_sparse_buffer(y, (B, J, JK), "float32")
+    Z = T.match_sparse_buffer(z, (B, I, IK), "float32")
+    with T.iter([B, I, J, K], "SSRS", "bmm") as [vb, vi, vj, vk]:
+        with T.init():
+            Z[vb, vi, vk] = 0.
+        Z[vb, vi, vk] = Z[vb, vi, vk] + X[vb, vi, vk] * Y[vb, vk, vj]
+
 
 def test_csrmm():
     mod = tvm.IRModule.from_expr(csrmm)
@@ -475,6 +509,12 @@ def test_csr_element_wise():
     tvm.testing.assert_allclose(b_ground_truth.data.reshape(-1), B_nd.numpy(), rtol=1e-5, atol=1e-5)
 
 
+def test_bmm():
+    mod = tvm.IRModule.from_expr(bmm)
+    mod = tvm.tir.transform.LowerSparseTIR()(mod)
+    print(mod['main'].script())
+
+
 if __name__ == "__main__":
     test_csrmm()
     test_csrmm_dense_iter()
@@ -483,3 +523,4 @@ if __name__ == "__main__":
     test_bsrmm()
     test_ellpack_mm()
     test_csr_element_wise()
+    test_bmm()

@@ -50,18 +50,15 @@ class AxisNode : public Object {
   void VisitAttrs(AttrVisitor* v) {
     v->Visit("name", &name);
     v->Visit("length", &length);
-    v->Visit("is_derived_axis", &is_derived_axis);
   }
 
   bool SEqualReduce(const AxisNode* other, SEqualReducer equal) const {
-    return equal(name, other->name) && equal(length, other->length) &&
-           equal(is_derived_axis, other->is_derived_axis);
+    return equal(name, other->name) && equal(length, other->length);
   }
 
   void SHashReduce(SHashReducer hash_reduce) const {
     hash_reduce(name);
     hash_reduce(length);
-    hash_reduce(is_derived_axis);
   }
 
   /* name of current axis. */
@@ -69,13 +66,12 @@ class AxisNode : public Object {
   /* length of current axis. For sparse axis, length refers to the upperbound of
    * the current axis. */
   PrimExpr length;
-  /* indicates whether current axis is derived by dense(axis) or fuse(axis1, axis2, ...) */
-  bool is_derived_axis = false;
 
   String GetName() const { return name; }
   PrimExpr GetLength() const { return length; }
   DataType GetIndexType() const { return length->dtype; }
   virtual Optional<Axis> GetParentAxis() const = 0;
+  Axis GetRootAxis() const;
 
   virtual AxisKind kind() const = 0;
   virtual PrimExpr nnz() const = 0;
@@ -266,7 +262,7 @@ class DenseVariableAxisNode : public DenseAxisNode {
   Optional<Axis> GetParentAxis() const final { return parent_; }
 
   static constexpr const char* _type_key = "tir.sparse.DenseVariableAxis";
-  TVM_DECLARE_FINAL_OBJECT_INFO(DenseVariableAxisNode, DenseAxisNode);
+  TVM_DECLARE_BASE_OBJECT_INFO(DenseVariableAxisNode, DenseAxisNode);
 };
 
 /*!
@@ -279,6 +275,30 @@ class DenseVariableAxis : public DenseAxis {
                                      Buffer indptr);
 
   TVM_DEFINE_OBJECT_REF_METHODS(DenseVariableAxis, DenseAxis, DenseVariableAxisNode);
+};
+
+/*!
+ * \brief Dense variable axis attached to another dense variable axis.
+ */
+class AttachedAxisNode : public DenseVariableAxisNode {
+ public:
+  /* The original axis before attaching. */
+  Axis orig_;
+
+  Axis GetOriginalAxis() const { return orig_; }
+
+  static constexpr const char* _type_key = "tir.sparse.AttachedAxis";
+  TVM_DECLARE_FINAL_OBJECT_INFO(AttachedAxisNode, DenseVariableAxisNode);
+};
+
+/*!
+ * \brief Managed reference to AttachedAxisNode.
+ * \sa AttachedAxisNode
+ */
+class AttachedAxis : public DenseVariableAxis {
+ public:
+  TVM_DLL explicit AttachedAxis(String name, Axis parent, Axis orig, PrimExpr nnz, Buffer indptr);
+  TVM_DEFINE_OBJECT_REF_METHODS(AttachedAxis, DenseVariableAxis, AttachedAxisNode);
 };
 
 /*!

@@ -105,6 +105,7 @@ PrimExpr AggregateOffset(PrimExpr prev_offset, Axis axis, PrimExpr index,
       break;
     }
     case AxisKind::kDenseVariable: {
+      // TODO(zihao): finish the aggregating offset for attached axis.
       auto dv_axis = axis.as<DenseVariableAxisNode>();
       new_offset = add(BufferLoad(dv_axis->indptr, {std::move(prev_offset)}), std::move(index));
       break;
