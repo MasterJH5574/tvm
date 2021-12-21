@@ -21,7 +21,6 @@ import scipy.sparse as sp
 import numpy as np
 from tvm.script import tir as T
 
-# pylint: disable=all
 
 @T.prim_func
 def csrmm(
@@ -390,9 +389,6 @@ def lowered_square_sum(a: T.handle, b: T.handle, indptr_j: T.handle, indices_j: 
                             T.writes([B_data[0 : M]])
                             T.block_attr({"sparse":True})
                             B_data[vi] = B_data[vi] + A_data[K_indptr[J_indptr[vi] + vj] + vk]
-
-
-# pylint: enable=no-member,invalid-name,unused-variable,unexpected-keyword-arg
 
 
 def test_csrmm():
