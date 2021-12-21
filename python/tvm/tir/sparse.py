@@ -144,6 +144,36 @@ class DenseVariableAxis(DenseAxis):
         )
 
 
+@tvm._ffi.register_object("tir.sparse.AttachedAxis")
+class AttachedAxis(DenseVariableAxis):
+    """AttachedAxis node
+
+    Parameters
+    ----------
+    name : str
+        The name of the axis.
+    parent : Axis
+        The axis to attach to.
+    orig : Axis
+        The axis to be attached.
+    nnz : PrimExpr
+        The number of nonzeros of the returned axis.
+    indptr : PrimExpr
+        The new indptr array of the the returned axis.
+    """
+
+    name : str
+    parent : Axis
+    orig : Axis
+    nnz : PrimExpr
+    indptr : PrimExpr
+    
+    def __init__(self, name, parent, length, nnz, indptr):
+        self.__init_handle_by_constructor__(
+            _ffi_api.AttachedAxis, name, parent, length, nnz, indptr
+        )
+
+
 @tvm._ffi.register_object("tir.sparse.SparseFixedAxis")
 class SparseFixedAxis(DenseAxis):
     """SparseFixedAxis node

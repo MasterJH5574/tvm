@@ -45,6 +45,18 @@ TVM_REGISTER_GLOBAL("tir.sparse.GetAxisIndexType").set_body_typed([](Axis axis) 
 
 TVM_REGISTER_GLOBAL("tir.sparse.GetNNZ").set_body_typed([](Axis axis) { return axis->nnz(); });
 
+/******** AxisNode ********/
+
+/*! \brief Implementation of get root axis function. */
+Axis AxisNode::GetRootAxis() const {
+  Optional<Axis> parent = GetParentAxis();
+  if (parent.defined()) {
+    return parent.value()->GetRootAxis();
+  } else {
+    return GetRef<Axis>(this);
+  }
+}
+
 /******** DenseFixedAxis ********/
 
 /*! \brief Default constructor of DenseFixedAxis */
@@ -67,35 +79,6 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
       p->stream << "dense_fixed(" << op->name << ", " << op->length << ")";
     });
 
-/******** DenseVariableAxis ********/
-
-/*! \brief Default constuctor of DenseVariableAxis */
-DenseVariableAxis::DenseVariableAxis(String name, Axis parent, PrimExpr length, PrimExpr nnz,
-                                     Buffer indptr) {
-  ObjectPtr<DenseVariableAxisNode> node = make_object<DenseVariableAxisNode>();
-  node->name = std::move(name);
-  node->parent_ = std::move(parent);
-  node->length = std::move(length);
-  node->nnz_ = std::move(nnz);
-  node->indptr = std::move(indptr);
-  data_ = std::move(node);
-}
-
-TVM_REGISTER_NODE_TYPE(DenseVariableAxisNode);
-
-TVM_REGISTER_GLOBAL("tir.sparse.DenseVariableAxis")
-    .set_body_typed([](String name, Axis parent, PrimExpr length, PrimExpr nnz, Buffer indptr) {
-      return DenseVariableAxis(std::move(name), std::move(parent), std::move(length),
-                               std::move(nnz), std::move(indptr));
-    });
-
-TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
-    .set_dispatch<DenseVariableAxisNode>([](const ObjectRef& node, ReprPrinter* p) {
-      auto* op = static_cast<const DenseVariableAxisNode*>(node.get());
-      p->stream << "dense_variable(" << op->name << ", " << op->length << ", " << op->indptr->name
-                << ")";
-    });
-
 /******** DenseFromSparseAxis ********/
 
 /*! \brief Default constructor of DenseFromSparseAxis */
@@ -103,7 +86,6 @@ DenseFromSparseAxis::DenseFromSparseAxis(SparseAxis base) {
   ObjectPtr<DenseFromSparseAxisNode> node = make_object<DenseFromSparseAxisNode>();
   node->name = base->name + "_dense";
   node->length = base->length;
-  node->is_derived_axis = true;
   node->base = std::move(base);
   data_ = std::move(node);
 }
@@ -135,7 +117,6 @@ FusedAxis::FusedAxis(Array<Axis> group, int index) {
   }
   node->name = "fused_" + fused_name + "_" + group[index]->name;
   node->length = group[index]->nnz();
-  node->is_derived_axis = true;
   node->group = std::move(group);
   node->index = index;
   data_ = std::move(node);
@@ -161,6 +142,63 @@ TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
         p->stream << orig_axis->name;
       }
       p->stream << ")";
+    });
+
+/******** DenseVariableAxis ********/
+
+/*! \brief Default constuctor of DenseVariableAxis */
+DenseVariableAxis::DenseVariableAxis(String name, Axis parent, PrimExpr length, PrimExpr nnz,
+                                     Buffer indptr) {
+  ObjectPtr<DenseVariableAxisNode> node = make_object<DenseVariableAxisNode>();
+  node->name = std::move(name);
+  node->parent_ = std::move(parent);
+  node->length = std::move(length);
+  node->nnz_ = std::move(nnz);
+  node->indptr = std::move(indptr);
+  data_ = std::move(node);
+}
+
+TVM_REGISTER_NODE_TYPE(DenseVariableAxisNode);
+
+TVM_REGISTER_GLOBAL("tir.sparse.DenseVariableAxis")
+    .set_body_typed([](String name, Axis parent, PrimExpr length, PrimExpr nnz, Buffer indptr) {
+      return DenseVariableAxis(std::move(name), std::move(parent), std::move(length),
+                               std::move(nnz), std::move(indptr));
+    });
+
+TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
+    .set_dispatch<DenseVariableAxisNode>([](const ObjectRef& node, ReprPrinter* p) {
+      auto* op = static_cast<const DenseVariableAxisNode*>(node.get());
+      p->stream << "dense_variable(" << op->name << ", " << op->length << ", " << op->indptr->name
+                << ")";
+    });
+
+/******** AttachedAxis ********/
+/*! \brief Default constructor of AttachedAxis */
+AttachedAxis::AttachedAxis(String name, Axis parent, Axis orig, PrimExpr nnz, Buffer indptr) {
+  ObjectPtr<AttachedAxisNode> node = make_object<AttachedAxisNode>();
+  node->name = std::move(name);
+  node->parent_ = std::move(parent);
+  node->orig_ = std::move(orig);
+  node->length = node->orig_->length;
+  node->nnz_ = std::move(nnz);
+  node->indptr = std::move(indptr);
+  data_ = std::move(node);
+}
+
+TVM_REGISTER_NODE_TYPE(AttachedAxisNode);
+
+TVM_REGISTER_GLOBAL("tir.sparse.AttachedAxis")
+    .set_body_typed([](String name, Axis parent, Axis orig, PrimExpr nnz, Buffer indptr) {
+      return AttachedAxis(std::move(name), std::move(parent), std::move(orig), std::move(nnz),
+                          std::move(indptr));
+    });
+
+TVM_STATIC_IR_FUNCTOR(ReprPrinter, vtable)
+    .set_dispatch<AttachedAxisNode>([](const ObjectRef& node, ReprPrinter* p) {
+      auto* op = static_cast<const AttachedAxisNode*>(node.get());
+      p->stream << "attached_axis(" << op->name << ", " << op->length << ", " << op->indptr->name
+                << ")";
     });
 
 /******** SparseFixedAxis ********/
