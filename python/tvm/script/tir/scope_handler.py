@@ -24,7 +24,7 @@ import tvm.tir
 from tvm.runtime import Object
 from tvm.ir import Span, Range
 from tvm.tir import Stmt, PrimExpr, IterVar, Var, Buffer, BufferRegion, ForKind
-from tvm.tir.sparse import SpIterVar
+from tvm.tir.sparse import SpIterVar, Axis
 
 from .node import BufferSlice
 from .utils import buffer_slice_to_region
@@ -331,10 +331,22 @@ class SparseBlock(WithScopeHandler):
     def __init__(self):
 
         def iter(axes: List, iter_types: str, name: str = "", span: Optional[Span] = None):
+
+            # flatten nested axes to axes, to address the special case of fusion.
+            def flatten_axes(axes: List[Union[Axis, List[Axis]]]) -> List[Axis]:
+                ret = []
+                for axis_group in axes:
+                    if isinstance(axis_group, List):
+                        ret += axis_group
+                    else:
+                        ret.append(axis_group)
+                return ret
+            
             assert (
                 self.node and self.context and self.body
             ), "call 'exit_scope' before 'enter_scope'"
             block_info = self.context.block_info_stack[-1]
+            axes = flatten_axes(axes)
 
             if len(axes) != len(self.sp_iters):
                 self.context.report_error(

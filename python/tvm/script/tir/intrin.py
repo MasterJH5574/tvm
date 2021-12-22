@@ -271,5 +271,5 @@ def dense(axis: Axis, span: Optional[Span] = None):
 
 
 @register
-def fuse(group: List[Axis], span: Optional[Span] = None):
-    return [FusedAxis(group, _) for _ in range(len(group))]
+def fuse(*group: List[Axis], span: Optional[Span] = None):
+    return [FusedAxis(group, i) for i, _ in enumerate(group)]

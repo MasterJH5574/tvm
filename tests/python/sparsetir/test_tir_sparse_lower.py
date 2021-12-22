@@ -347,6 +347,36 @@ def bmm(
 
 
 @T.prim_func
+def sddmm(a: T.handle, b: T.handle, c: T.handle, indptr: T.handle, indices: T.handle, m: T.int32, n: T.int32, k: T.int32, nnz: T.int32) -> None:
+    I = T.dense_fixed(m)
+    J = T.sparse_variable(I, (n, nnz), (indptr, indices), "int32")
+    K = T.dense_fixed(k)
+    A = T.match_sparse_buffer(a, (I, K), "float32")
+    B = T.match_sparse_buffer(b, (T.dense(J), K), "float32")
+    C = T.match_sparse_buffer(c, (I, J), "float32")
+
+    with T.iter([I, J, K], "SSR", "sddmm") as [vi, vj, vk]:
+        with T.init():
+            C[vi, vj] = 0. 
+        C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vj, vk]
+
+
+@T.prim_func
+def fused_sddmm(a: T.handle, b: T.handle, c: T.handle, indptr: T.handle, indices: T.handle, m: T.int32, n: T.int32, k: T.int32, nnz: T.int32) -> None:
+    I = T.dense_fixed(m)
+    J = T.sparse_variable(I, (n, nnz), (indptr, indices), "int32")
+    K = T.dense_fixed(k)
+    A = T.match_sparse_buffer(a, (I, K), "float32")
+    B = T.match_sparse_buffer(b, (T.dense(J), K), "float32")
+    C = T.match_sparse_buffer(c, (I, J), "float32")
+
+    with T.iter([T.fuse(I, J), K], "SSR", "sddmm") as [vi, vj, vk]:
+        with T.init():
+            C[vi, vj] = 0. 
+        C[vi, vj] = C[vi, vj] + A[vi, vk] * B[vj, vk]
+
+
+@T.prim_func
 def square_sum(a: T.handle, b: T.handle, indptr_j: T.handle, indices_j: T.handle, indptr_k: T.handle, indices_k: T.handle, nnz_j: T.int32, nnz_k: T.int32, M: T.int32, N1: T.int32, N2: T.int32):
     I = T.dense_fixed(M)
     J = T.sparse_variable(I, (N1, nnz_j), (indptr_j, indices_j), "int32")
@@ -616,7 +646,20 @@ def test_csr_element_wise():
 def test_bmm():
     mod = tvm.IRModule.from_expr(bmm)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    # Todo
+    # TODO
+
+
+def test_sddmm():
+    mod = tvm.IRModule.from_expr(sddmm)
+    mod = tvm.tir.transform.LowerSparseTIR()(mod)
+    print(mod['main'].script())
+    # TODO
+
+
+def test_fused_sddmm():
+    mod = tvm.IRModule.from_expr(fused_sddmm)
+    print(mod['main'].script())
+    # TODO
 
 
 def test_square_sum():
@@ -707,6 +750,8 @@ if __name__ == "__main__":
     test_bsrmm()
     test_ellpack_mm()
     test_csr_element_wise()
+    test_sddmm()
+    test_fused_sddmm()
     test_bmm()
     test_square_sum()
     test_square_sum_two_K()
