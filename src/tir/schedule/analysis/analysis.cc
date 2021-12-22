@@ -168,7 +168,8 @@ Definition of a scope that is a stage pipeline:
         if (it_atomic != block->annotations.end()) {
           is_atomic = ((*it_atomic).second).as<IntImmNode>()->value;
         }
-        if (!is_atomic) {
+        // Todo(ruihang): Temporary hack. Deal with the "sparse" annotation later.
+        if (!is_atomic && block->annotations.find("sparse") == block->annotations.end()) {
           throw NotCompactDataFlowError(self->mod, GetRef<Stmt>(scope_root_subtree->stmt),
                                         GetRef<Block>(block));
         }

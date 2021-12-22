@@ -322,10 +322,6 @@ class SparseBufferCtx {
           matches_.emplace_back(axis->name == sp_iter_var->axis->name);
         }
       }
-
-      // update offset
-      PrimExpr new_offset = AggregateOffset(offsets_.back(), axis, std::move(coordinate), ana_);
-      offsets_.emplace_back(std::move(new_offset));
     }
 
     /*! \brief get the axis given dimension index of current buffer. */
@@ -341,7 +337,7 @@ class SparseBufferCtx {
               AggregateOffset(add(offsets_[dim], 1), axis, Integer(0), ana_)};
     }
 
-   private:
+   public:
     String buf_name_;
     Array<Axis> axes_;
     std::vector<PrimExpr> offsets_;
@@ -375,7 +371,12 @@ class SparseBufferCtx {
     top()->Register(dim, std::move(coordinate), std::move(orig_idx));
   }
 
- private:
+  void AddOffset(int dim, PrimExpr offset) {
+    ICHECK_EQ(dim + 1, static_cast<int>(top()->offsets_.size()));
+    top()->offsets_.push_back(offset);
+  }
+
+ public:
   std::vector<Scope> stack_;
   arith::Analyzer* ana_;
 
@@ -421,18 +422,22 @@ class IndexTransformer : public StmtExprMutator {
           auto sf_axis = axis.as<SparseFixedAxisNode>();
           PrimExpr l, r;
           std::tie(l, r) = sp_buf_ctx_.GetIndicesRange(dim);
-          offset = lower_bound(sf_axis->indices->data, coordinate, l, r);
+          offset = lower_bound(sf_axis->indices->data, coordinate, l, r) - l;
           break;
         }
         case AxisKind::kSparseVariable:
           auto sv_axis = axis.as<SparseVariableAxisNode>();
           PrimExpr l, r;
           std::tie(l, r) = sp_buf_ctx_.GetIndicesRange(dim);
-          offset = lower_bound(sv_axis->indices->data, coordinate, l, r);
+          offset = lower_bound(sv_axis->indices->data, coordinate, l, r) - l;
           break;
       }
     }
 
+    // update offset
+    PrimExpr new_offset = AggregateOffset(sp_buf_ctx_.top()->offsets_.back(), axis,
+                                          offset, sp_buf_ctx_.ana_);
+    sp_buf_ctx_.top()->offsets_.push_back(std::move(new_offset));
     return offset;
   }
 
@@ -562,7 +567,8 @@ class IndexTransformer : public StmtExprMutator {
       Axis axis = sp_it_var->axis;
       auto parent = axis->GetParentAxis();
       bool create_new_blk = false;
-      bool is_fixed_axis = axis->kind() == AxisKind::kDenseFixed || axis->kind() == AxisKind::kSparseFixed;
+      bool is_fixed_axis =
+          axis->kind() == AxisKind::kDenseFixed || axis->kind() == AxisKind::kSparseFixed;
       if (!is_fixed_axis && parent.defined()) {
         const AxisNode* parent_node = parent.value().get();
         if (in_block.find(parent_node) != in_block.end()) {
@@ -572,7 +578,8 @@ class IndexTransformer : public StmtExprMutator {
           /* parent node is in the previous blocks in the stack, no need to create new block. */
           create_new_blk = false;
         } else {
-          CHECK(false) << "The parent axis of " << axis->GetName() << " should appear before " << axis->GetName() << " when defining a sparse block.";
+          CHECK(false) << "The parent axis of " << axis->GetName() << " should appear before "
+                       << axis->GetName() << " when defining a sparse block.";
         }
       }
       if (create_new_blk) {
