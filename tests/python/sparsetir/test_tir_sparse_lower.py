@@ -19,6 +19,7 @@ import tvm.testing
 import tvm.tir as tir
 import scipy.sparse as sp
 import numpy as np
+import pytest
 from tvm.script import tir as T
 
 
@@ -367,7 +368,7 @@ def lowered_square_sum(a: T.handle, b: T.handle, indptr_j: T.handle, indices_j: 
     J_indices = T.match_buffer(indices_j, [nnz_j], dtype="int32")
     K_indptr = T.match_buffer(indptr_k, [nnz_j + 1], dtype="int32")
     K_indices = T.match_buffer(indices_k, [nnz_k], dtype="int32")
-    
+
     for v_vi in T.serial(0, M):
         with T.block("square_sum_2"):
             vi = T.axis.spatial(M, v_vi)
@@ -466,6 +467,7 @@ def test_csrmm():
     tvm.testing.assert_allclose(y_ground_truth.reshape(-1), Y_nd.numpy(), rtol=1e-5, atol=1e-5)
 
 
+@pytest.mark.skip(reason="Under implementation")
 def test_csrmm_dense_iter():
     mod = tvm.IRModule.from_expr(csrmm_dense_iter)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
@@ -473,6 +475,7 @@ def test_csrmm_dense_iter():
     # Todo
 
 
+@pytest.mark.skip(reason="Under implementation")
 def test_segment_reduce():
     mod = tvm.IRModule.from_expr(segment_reduce)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
@@ -609,6 +612,7 @@ def test_csr_element_wise():
     tvm.testing.assert_allclose(b_ground_truth.data.reshape(-1), B_nd.numpy(), rtol=1e-5, atol=1e-5)
 
 
+@pytest.mark.skip(reason="Under implementation")
 def test_bmm():
     mod = tvm.IRModule.from_expr(bmm)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
@@ -656,7 +660,7 @@ def test_square_sum_two_K():
     mod = tvm.IRModule.from_expr(square_sum_two_K)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
     tvm.ir.assert_structural_equal(mod["main"], lowered_square_sum_two_K, True)
-    
+
     sch = tir.Schedule(mod, debug_mask="all")
     i, = sch.get_loops(sch.get_block("square_sum_2"))
     sch.bind(i, "threadIdx.x")
