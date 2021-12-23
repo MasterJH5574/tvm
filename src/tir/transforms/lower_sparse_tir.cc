@@ -91,8 +91,7 @@ Map<Var, Buffer> UpdateBufferMap(PrimFunc f) {
  * \param ana_ The analyzer used for simplifying expressions. TODO(zihao): make it more cleaner.
  * \return The lowered index.
  */
-PrimExpr AggregateOffset(PrimExpr prev_offset, Axis axis, PrimExpr index,
-                         arith::Analyzer* ana_ = nullptr) {
+PrimExpr AggregateOffset(PrimExpr prev_offset, Axis axis, PrimExpr index, arith::Analyzer* ana_) {
   PrimExpr new_offset;
   switch (axis->kind()) {
     case AxisKind::kDenseFixed: {
@@ -116,20 +115,17 @@ PrimExpr AggregateOffset(PrimExpr prev_offset, Axis axis, PrimExpr index,
       break;
     }
   }
-  if (ana_ == nullptr) {
-    return new_offset;
-  } else {
-    return ana_->Simplify(new_offset);
-  }
+  return ana_->Simplify(new_offset);
 }
 
 /*! \brief Storing the context information of a sparse block. */
 class SparseBlockCtx {
  private:
   struct Scope {
-    explicit Scope(SparseBlock block, arith::Analyzer* ana) : sp_block(std::move(block)), ana(ana) {
+    explicit Scope(SparseBlock sp_block, arith::Analyzer* ana)
+        : sp_block(std::move(sp_block)), ana(ana) {
       // initialize sparse iter var dependency map.
-      for (const SpIterVar& sp_iter_var : sp_block->sp_iter_vars) {
+      for (const SpIterVar& sp_iter_var : this->sp_block->sp_iter_vars) {
         axis2sp_iter.Set(sp_iter_var->axis, sp_iter_var);
         sp_iter_var_map.Set(sp_iter_var->var, sp_iter_var);
       }
@@ -143,7 +139,6 @@ class SparseBlockCtx {
   };
 
  public:
-  /*! \brief default constructor */
   explicit SparseBlockCtx(arith::Analyzer* ana) : ana_(ana) {}
 
   /*! \brief enter new scope */
@@ -164,8 +159,8 @@ class SparseBlockCtx {
     return top()->sp_iter_var_map.Get(GetRef<Var>(var));
   }
 
-  Optional<SpIterVar> GetParentSpIterVar(SpIterVar sp_iter) {
-    Optional<Axis> parent_axis = sp_iter->axis->GetParentAxis();
+  Optional<SpIterVar> GetParentSpIterVar(const SpIterVar& sp_iter) {
+    const Optional<Axis>& parent_axis = sp_iter->axis->GetParentAxis();
     if (parent_axis.defined()) {
       return top()->axis2sp_iter.Get(parent_axis.value());
     } else {
@@ -178,16 +173,16 @@ class SparseBlockCtx {
    * \param sp_iter_var The sparse iter var to lookup.
    * \return A PrimExpr representing the offset.
    */
-  PrimExpr GetOffset(SpIterVar sp_iter_var) {
-    Optional<PrimExpr> offset = top()->cached_offsets.Get(sp_iter_var);
+  PrimExpr GetOffset(const SpIterVar& sp_iter) {
+    const Optional<PrimExpr>& offset = top()->cached_offsets.Get(sp_iter);
     if (offset.defined()) {
       return offset.value();
     } else {
-      Optional<SpIterVar> parent_sp_iter = GetParentSpIterVar(sp_iter_var);
-      PrimExpr prev_off = parent_sp_iter.defined() ? GetOffset(parent_sp_iter.value()) : Integer(0);
-      PrimExpr new_off = AggregateOffset(prev_off, sp_iter_var->axis, sp_iter_var->var, ana_);
-      top()->cached_offsets.Set(sp_iter_var, new_off);
-      return new_off;
+      const Optional<SpIterVar>& parent_sp_iter = GetParentSpIterVar(sp_iter);
+      PrimExpr prev_ofs = parent_sp_iter.defined() ? GetOffset(parent_sp_iter.value()) : Integer(0);
+      PrimExpr new_ofs = AggregateOffset(std::move(prev_ofs), sp_iter->axis, sp_iter->var, ana_);
+      top()->cached_offsets.Set(sp_iter, new_ofs);
+      return new_ofs;
     }
   }
 
@@ -196,15 +191,15 @@ class SparseBlockCtx {
    * \param sp_iter_var The compressed iterator.
    * \return A PrimExpr representing the coordinate.
    */
-  PrimExpr GetCoordinate(SpIterVar sp_iter_var) {
-    const Axis& axis = sp_iter_var->axis;
+  PrimExpr GetCoordinate(SpIterVar sp_iter) {
+    const Axis& axis = sp_iter->axis;
     AxisKind kind = axis->kind();
     if (kind == AxisKind::kDenseFixed || kind == AxisKind::kDenseVariable) {
       // if dense, just return the value.
-      return sp_iter_var->var;
+      return sp_iter->var;
     }
 
-    PrimExpr offset = GetOffset(sp_iter_var);
+    PrimExpr offset = GetOffset(sp_iter);
     if (kind == AxisKind::kSparseFixed) {
       return BufferLoad(Downcast<SparseFixedAxis>(axis)->indices, {std::move(offset)});
     } else {  // AxisKind::kSparseVariable
@@ -218,11 +213,11 @@ class SparseBlockCtx {
    * \return A tuple of PrimExpr, the first elements refers to the start position, and the second
    * elements refers the end position.
    */
-  PrimExpr GetIterExtent(SpIterVar sp_iter_var) {
-    Optional<SpIterVar> parent_sp_iter = GetParentSpIterVar(sp_iter_var);
+  PrimExpr GetIterExtent(SpIterVar sp_iter) {
+    Optional<SpIterVar> parent_sp_iter = GetParentSpIterVar(sp_iter);
     PrimExpr prev_off = parent_sp_iter.defined() ? GetOffset(parent_sp_iter.value()) : Integer(0);
-    return sub(AggregateOffset(add(prev_off, 1), sp_iter_var->axis, Integer(0), ana_),
-               AggregateOffset(prev_off, sp_iter_var->axis, Integer(0), ana_));
+    return sub(AggregateOffset(add(prev_off, 1), sp_iter->axis, Integer(0), ana_),
+               AggregateOffset(prev_off, sp_iter->axis, Integer(0), ana_));
   }
 
  private:
@@ -239,18 +234,18 @@ class SparseBufferCtx {
   struct Scope {
     explicit Scope(SparseBuffer sp_buffer, const SparseBlockCtx* sp_blk_ctx, arith::Analyzer* ana)
         : sp_buffer(std::move(sp_buffer)), sp_blk_ctx(sp_blk_ctx), ana(ana) {
+      offsets.reserve(this->sp_buffer->ndim() + 1);
       offsets.push_back(Integer(0));
       n_matched_iters = 0;
     }
 
     SparseBuffer sp_buffer;
-    std::vector<PrimExpr> offsets;
+    Array<PrimExpr> offsets;
     int n_matched_iters;
     const SparseBlockCtx* sp_blk_ctx;
     arith::Analyzer* ana;
   };
 
-  /*! \brief default constructor */
   explicit SparseBufferCtx(arith::Analyzer* ana) : ana_(ana) {}
 
   /*! \brief enter new scope */
@@ -262,22 +257,22 @@ class SparseBufferCtx {
   void ExitScope() { stack_.pop_back(); }
 
   /*! \brief call GetAxis in top scope. */
-  Axis GetAxis(int dim) const { return top()->sp_buffer->axes[dim]; }
+  inline Axis GetAxis(int dim) const { return top()->sp_buffer->axes[dim]; }
 
   /*! \brief call MatchWithSpBlock in top scope. */
-  const inline bool MatchWithSpBlock(int dim) const { return top()->n_matched_iters > dim; }
+  inline bool MatchWithSpBlock(int dim) const { return top()->n_matched_iters > dim; }
 
   /*! \brief return the indices range of the given dimension in current buffer. */
   std::tuple<PrimExpr, PrimExpr> GetIndicesRange(int dim) {
+    const PrimExpr& prev_ofs = top()->offsets[dim];
     const Axis& axis = top()->sp_buffer->axes[dim];
-    return {AggregateOffset(top()->offsets[dim], axis, Integer(0), ana_),
-            AggregateOffset(add(top()->offsets[dim], 1), axis, Integer(0), ana_)};
+    return {AggregateOffset(prev_ofs, axis, Integer(0), ana_),
+            AggregateOffset(add(prev_ofs, 1), axis, Integer(0), ana_)};
   }
 
   /*! \brief update axis match information at dimension dim */
-  void UpdateMatch(int dim, PrimExpr index) {
-    ICHECK(dim + 1 == int(top()->offsets.size()))
-        << "Cannot register coordinate of index " << std::to_string(dim) << " at this time";
+  void UpdateMatch(int dim, const PrimExpr& index) {
+    ICHECK(dim + 1 == static_cast<int>(top()->offsets.size()));
     const Axis& axis = GetAxis(dim);
 
     if (const auto* var = index.as<VarNode>()) {
@@ -289,9 +284,9 @@ class SparseBufferCtx {
   }
 
   /*! \brief call UpdateOffset in top scope. */
-  PrimExpr UpdateOffset(int dim, PrimExpr offset_i) {
+  PrimExpr UpdateOffset(int dim, PrimExpr index) {
     const Axis& axis = GetAxis(dim);
-    PrimExpr new_offset = AggregateOffset(top()->offsets.back(), axis, offset_i, ana_);
+    PrimExpr new_offset = AggregateOffset(top()->offsets.back(), axis, index, ana_);
     top()->offsets.push_back(new_offset);
     return new_offset;
   }
