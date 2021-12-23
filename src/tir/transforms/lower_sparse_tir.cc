@@ -308,11 +308,6 @@ class IndexTransformer : public StmtExprMutator {
   explicit IndexTransformer() : sp_blk_ctx_(&ana_), sp_buf_ctx_(&ana_) {}
 
  private:
-  // Sparse block context stack;
-  SparseBlockCtx sp_blk_ctx_;
-  // Sparse buffer context stack;
-  SparseBufferCtx sp_buf_ctx_;
-
   /*!
    * \brief Return the offset of index on given dimension.
    * \param dim The dimension index.
@@ -349,11 +344,11 @@ class IndexTransformer : public StmtExprMutator {
    * \param indices The array of indices.
    */
   PrimExpr ComputeOffset(SparseBuffer sp_buffer, Array<PrimExpr> indices) {
-    int num_lowered_indices = static_cast<int>(indices.size());
-    ICHECK_LE(num_lowered_indices, sp_buffer->ndim());
+    ICHECK_EQ(static_cast<int>(indices.size()), sp_buffer->ndim());
+    int ndim = sp_buffer->ndim();
 
     PrimExpr offset = Integer(0);
-    for (int i = 0; i < num_lowered_indices; ++i) {
+    for (int i = 0; i < ndim; ++i) {
       offset = sp_buf_ctx_.UpdateOffset(i, ViewIndexInAxis(i, indices[i]));
     }
     return offset;
@@ -363,13 +358,9 @@ class IndexTransformer : public StmtExprMutator {
    * \brief Change sparse iters to coordinates.
    * \param v The variable node.
    */
-  PrimExpr VisitExpr_(const VarNode* v) final {
-    auto it = sp_blk_ctx_.GetSparseIterVar(v);
-    if (it.defined()) {
-      return sp_blk_ctx_.GetCoordinate(it.value());
-    } else {
-      return GetRef<PrimExpr>(v);
-    }
+  PrimExpr VisitExpr_(const VarNode* var) final {
+    Optional<SpIterVar> sp_iter = sp_blk_ctx_.GetSparseIterVar(var);
+    return sp_iter.defined() ? sp_blk_ctx_.GetCoordinate(sp_iter.value()) : GetRef<PrimExpr>(var);
   }
 
   /*!
@@ -379,9 +370,9 @@ class IndexTransformer : public StmtExprMutator {
   PrimExpr VisitExpr_(const SparseBufferLoadNode* load) final {
     buffer_read_.insert(load->buffer.get());
     sp_buf_ctx_.EnterScope(load->buffer, &sp_blk_ctx_);
-    PrimExpr lowered_indices = ComputeOffset(load->buffer, load->indices);
+    PrimExpr offset = ComputeOffset(load->buffer, load->indices);
     sp_buf_ctx_.ExitScope();
-    return BufferLoad(load->buffer->data, {std::move(lowered_indices)});
+    return BufferLoad(load->buffer->data, {std::move(offset)});
   }
 
   /*!
@@ -392,16 +383,38 @@ class IndexTransformer : public StmtExprMutator {
     buffer_write_.insert(store->buffer.get());
     PrimExpr value = ExprMutator::VisitExpr(store->value);
     sp_buf_ctx_.EnterScope(store->buffer, &sp_blk_ctx_);
-    PrimExpr lowered_indices = ComputeOffset(store->buffer, store->indices);
+    PrimExpr offset = ComputeOffset(store->buffer, store->indices);
     sp_buf_ctx_.ExitScope();
-    return BufferStore(store->buffer->data, std::move(value), {std::move(lowered_indices)});
+    return BufferStore(store->buffer->data, std::move(value), {std::move(offset)});
   }
 
   /*!
    * \brief Rewrite sparse block to ordinary block.
    * \param sp_block The sparse block to be rewritten.
    */
-  Stmt VisitStmt_(const SparseBlockNode* sp_block) {
+  Stmt VisitStmt_(const SparseBlockNode* sp_block) final {
+    struct BlockInfo {
+      Array<Var> loop_vars;
+      Array<IterVar> block_iters;
+      Array<PrimExpr> iter_bindings;
+      Optional<Stmt> init;
+
+      void Push(const Var& loop_var, const IterVar& block_iter, const PrimExpr& iter_binding) {
+        loop_vars.push_back(loop_var);
+        block_iters.push_back(block_iter);
+        iter_bindings.push_back(iter_binding);
+      }
+
+      bool LoopVarAppears(const Var& target_loop_var) {
+        for (const Var& loop_var : loop_vars) {
+          if (loop_var.same_as(target_loop_var)) {
+            return true;
+          }
+        }
+        return false;
+      }
+    };
+
     int n_iter = static_cast<int>(sp_block->sp_iter_vars.size());
     buffer_read_.clear();
     buffer_write_.clear();
@@ -412,99 +425,62 @@ class IndexTransformer : public StmtExprMutator {
     // Step 2. Recursively mutate the `init` field and the block body.
     Optional<Stmt> init =
         sp_block->init.defined() ? VisitStmt(sp_block->init.value()) : Optional<Stmt>(NullOpt);
-
     Stmt body = VisitStmt(sp_block->body);
 
     // Step 3. Create the new loop vars.
-    std::unordered_map<const VarNode*, PrimExpr> var_map;
-    Array<Var> all_loop_vars;
+    std::unordered_map<const VarNode*, PrimExpr> var_map;  // Todo: change to Map?
+    Map<Axis, Var> axis2loop_var;
     var_map.reserve(n_iter);
     for (const SpIterVar& sp_iter_var : sp_block->sp_iter_vars) {
       Var loop_var("v_" + sp_iter_var->var->name_hint);
-      all_loop_vars.push_back(loop_var);
       var_map[sp_iter_var->var.get()] = loop_var;
+      axis2loop_var.Set(sp_iter_var->axis, loop_var);
     }
 
     // Step 4. Collect block iters and iter bindings.
-    /* Whether the axis appears in the stack. */
-    std::unordered_set<const AxisNode*> in_stack;
-    /* A stack that stores block itervars in each block. */
-    std::vector<Array<IterVar>> block_iters_st;
-    /* A stack that stores itervar bindings in each block. */
-    std::vector<Array<PrimExpr>> iter_bindings_st;
-    /* A stack that stores generated loop vars in each block. */
-    std::vector<Array<Var>> loop_vars_st;
-    /* A stack that stores whether to place init block in each block. */
-    std::vector<bool> place_init_st;
-    /* An indicator that records whether init block has been set. */
-    bool init_set = false;
-    /* Block itervars of current block. */
-    Array<IterVar> block_iters;
-    /* Itervar bindings of current block. */
-    Array<PrimExpr> iter_bindings;
-    /* Generated loop vars of current block. */
-    Array<Var> loop_vars;
-    /* Whether the axis appears in the cuurent block. */
-    std::unordered_set<const AxisNode*> in_block;
+    std::unordered_set<const VarNode*> defined_loop_vars;
+    std::vector<BlockInfo> block_infos(1);
+
     /* An indicator that records whether there is reduction axis in current block. */
     bool has_reduction_var = false;
 
-    auto UpdateStack = [&]() {
-      block_iters_st.push_back(std::move(block_iters));
-      iter_bindings_st.push_back(std::move(iter_bindings));
-      loop_vars_st.push_back(std::move(loop_vars));
-      if (init_set) {
-        place_init_st.push_back(false);
-      } else {
-        place_init_st.push_back(has_reduction_var);
-        init_set |= has_reduction_var;
-      }
-    };
-
     for (int i = 0; i < n_iter; ++i) {
       SpIterVar sp_it_var = sp_block->sp_iter_vars[i];
+      Var loop_var = Downcast<Var>(var_map[sp_it_var->var.get()]);
       Axis axis = sp_it_var->axis;
-      auto parent = axis->GetParentAxis();
+
       bool create_new_blk = false;
-      bool is_fixed_axis =
-          axis->kind() == AxisKind::kDenseFixed || axis->kind() == AxisKind::kSparseFixed;
-      if (!is_fixed_axis && parent.defined()) {
-        const AxisNode* parent_node = parent.value().get();
-        if (in_block.find(parent_node) != in_block.end()) {
+      if (axis->kind() == AxisKind::kDenseVariable || axis->kind() == AxisKind::kSparseVariable) {
+        Axis parent_axis = axis->GetParentAxis().value();
+        Optional<Var> loop_var = axis2loop_var.Get(parent_axis);
+        CHECK(loop_var.defined()) << "ValueError: The parent axis of " << axis
+                                  << "does not appear in sparse block "
+                                  << GetRef<SparseBlock>(sp_block);
+
+        if (block_infos.back().LoopVarAppears(loop_var.value())) {
           /* parent node is in the current block, need to create new block. */
           create_new_blk = true;
-        } else if (in_stack.find(parent_node) != in_stack.end()) {
-          /* parent node is in the previous blocks in the stack, no need to create new block. */
-          create_new_blk = false;
         } else {
-          CHECK(false) << "The parent axis of " << axis->GetName() << " should appear before "
-                       << axis->GetName() << " when defining a sparse block.";
+          CHECK(defined_loop_vars.count(loop_var.value().get()))
+              << "ValueError: The parent axis of " << axis
+              << " should appear before it in sparse block " << GetRef<SparseBlock>(sp_block);
         }
       }
+
       if (create_new_blk) {
         /* update in stack set. */
-        for (const AxisNode* node : in_block) {
-          in_stack.insert(node);
+        for (const Var& loop_var : block_infos.back().loop_vars) {
+          defined_loop_vars.insert(loop_var.get());
         }
-        /* Update stack. */
-        UpdateStack();
-        /* Reset block states. */
-        loop_vars = {};
-        block_iters = {};
-        iter_bindings = {};
-        has_reduction_var = false;
-        in_block.clear();
+        block_infos.emplace_back();
       }
 
-      loop_vars.push_back(all_loop_vars[i]);
-      block_iters.push_back(SpIterVarToIterVar(sp_it_var, var_map));
-      iter_bindings.push_back(all_loop_vars[i]);
-      has_reduction_var |= sp_it_var->is_reduction;
-      in_block.insert(axis.get());
+      block_infos.back().Push(loop_var, SpIterVarToIterVar(sp_it_var, var_map), loop_var);
+      if (!has_reduction_var && sp_it_var->is_reduction) {
+        block_infos.back().init = std::move(init);
+        has_reduction_var = true;
+      }
     }
-
-    // Update the last block.
-    UpdateStack();
 
     // Step 5. Generate the read-region and write-retion of the block.
     Array<BufferRegion> reads{};
@@ -512,39 +488,24 @@ class IndexTransformer : public StmtExprMutator {
     GenerateReadWriteRegions(sp_block, &reads, &writes);
 
     // Step 6. Generate nested blocks and loops from innermost to outermost.
-    int blk_counter = 0;
-    while (!block_iters_st.empty()) {
-      Array<IterVar> block_iters = std::move(block_iters_st.back());
-      Array<PrimExpr> iter_bindings = std::move(iter_bindings_st.back());
-      Array<Var> loop_vars = std::move(loop_vars_st.back());
-      bool place_init = place_init_st.back();
-      block_iters_st.pop_back();
-      iter_bindings_st.pop_back();
-      loop_vars_st.pop_back();
-      place_init_st.pop_back();
-
-      Map<String, ObjectRef> mapping;
-      mapping.Set("sparse", Bool(true));
-      String blk_name_hint = sp_block->name;
-      if (blk_counter != 0) {
-        blk_name_hint = blk_name_hint + "_" + std::to_string(blk_counter);
-      }
-      Block block(/*iter_vars=*/block_iters,
+    for (int i = static_cast<int>(block_infos.size()) - 1; i >= 0; --i) {
+      BlockInfo info = std::move(block_infos[i]);
+      Block block(/*iter_vars=*/info.block_iters,
                   /*reads=*/reads,
                   /*writes=*/writes,
-                  /*name_hint=*/blk_name_hint,
+                  /*name_hint=*/sp_block->name + std::to_string(i),
                   /*body=*/std::move(body),
-                  /*init=*/place_init ? std::move(init) : NullOpt,
+                  /*init=*/std::move(info.init),
                   /*alloc_buffers=*/{},
                   /*match_buffers=*/{},
-                  /*annotations=*/std::move(mapping),
-                  /*span=*/sp_block->span);
-      BlockRealize block_realize(std::move(iter_bindings), const_true(), std::move(block));
+                  /*annotations=*/{{"sparse", Bool(true)}});
+      BlockRealize block_realize(/*iter_values=*/std::move(info.iter_bindings),
+                                 /*predicate=*/const_true(),
+                                 /*block=*/std::move(block));
       // Generate outer loop and the block binding.
-      Stmt loop =
-          GenerateLoops(std::move(block_realize), std::move(block_iters), std::move(loop_vars));
-      body = loop;
-      blk_counter += 1;
+      Stmt loop = GenerateLoops(std::move(block_realize), std::move(info.block_iters),
+                                std::move(info.loop_vars));
+      body = std::move(loop);
     }
 
     // Step 7: Exit sparse block context.
@@ -562,8 +523,7 @@ class IndexTransformer : public StmtExprMutator {
   IterVar SpIterVarToIterVar(SpIterVar sp_iter,
                              const std::unordered_map<const VarNode*, PrimExpr>& var_map) {
     PrimExpr extent{nullptr};
-    AxisKind kind = sp_iter->axis->kind();
-    switch (kind) {
+    switch (sp_iter->axis->kind()) {
       case AxisKind::kDenseFixed: {
         extent = sp_iter->max_extent;
         break;
@@ -627,9 +587,13 @@ class IndexTransformer : public StmtExprMutator {
     return body;
   }
 
-  arith::Analyzer ana_;
+  // Sparse block context stack;
+  SparseBlockCtx sp_blk_ctx_;
+  // Sparse buffer context stack;
+  SparseBufferCtx sp_buf_ctx_;
   std::unordered_set<const SparseBufferNode*> buffer_read_;
   std::unordered_set<const SparseBufferNode*> buffer_write_;
+  arith::Analyzer ana_;
 };
 
 /*!

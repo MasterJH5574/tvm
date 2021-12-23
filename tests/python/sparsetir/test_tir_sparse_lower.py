@@ -653,14 +653,14 @@ def test_bmm():
 def test_sddmm():
     mod = tvm.IRModule.from_expr(sddmm)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
-    print(mod['main'].script())
+    # print(mod['main'].script())
     # TODO
 
 
 @pytest.mark.skip(reason="Under implementation")
 def test_fused_sddmm():
     mod = tvm.IRModule.from_expr(fused_sddmm)
-    print(mod['main'].script())
+    # print(mod['main'].script())
     # TODO
 
 
@@ -707,7 +707,7 @@ def test_square_sum_two_K():
     tvm.ir.assert_structural_equal(mod["main"], lowered_square_sum_two_K, True)
 
     sch = tir.Schedule(mod, debug_mask="all")
-    i, = sch.get_loops(sch.get_block("square_sum_2"))
+    i, = sch.get_loops(sch.get_block("square_sum0"))
     sch.bind(i, "threadIdx.x")
 
     density = 0.0125
