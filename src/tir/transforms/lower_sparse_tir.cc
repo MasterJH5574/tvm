@@ -300,8 +300,8 @@ class SparseBufferCtx {
       matches_.emplace_back(true);
     }
 
-    /*! \brief register the coordinate of a new dimension of current buffer. */
-    void Register(int dim, PrimExpr coordinate, PrimExpr orig_idx) {
+    /*! \brief update axis match information at dimension dim */
+    void UpdateMatch(int dim, PrimExpr orig_idx) {
       ICHECK(dim + 1 == int(offsets_.size()))
           << "Cannot register coordinate of index " << std::to_string(dim) << " at this time";
       const Axis& axis = GetAxis(dim);
@@ -322,6 +322,13 @@ class SparseBufferCtx {
           matches_.emplace_back(axis->name == sp_iter_var->axis->name);
         }
       }
+    }
+
+    /*! \brief update aggregated offset at dimension dim */
+    void UpdateOffset(int dim, PrimExpr offset_i) {
+      const Axis& axis = GetAxis(dim);
+      PrimExpr new_offset = AggregateOffset(offsets_.back(), axis, offset_i, ana_);
+      offsets_.emplace_back(std::move(new_offset));
     }
 
     /*! \brief get the axis given dimension index of current buffer. */
@@ -366,15 +373,11 @@ class SparseBufferCtx {
   /*! \brief call GetIndicesRange in top scope. */
   std::tuple<PrimExpr, PrimExpr> GetIndicesRange(int dim) { return top()->GetIndicesRange(dim); }
 
-  /*! \brief call Register in top scope. */
-  void Register(int dim, PrimExpr coordinate, PrimExpr orig_idx) {
-    top()->Register(dim, std::move(coordinate), std::move(orig_idx));
-  }
+  /*! \brief call UpdateMatch in top scope. */
+  void UpdateMatch(int dim, PrimExpr orig_idx) { top()->UpdateMatch(dim, std::move(orig_idx)); }
 
-  void AddOffset(int dim, PrimExpr offset) {
-    ICHECK_EQ(dim + 1, static_cast<int>(top()->offsets_.size()));
-    top()->offsets_.push_back(offset);
-  }
+  /*! \brief call UpdateOffset in top scope. */
+  void UpdateOffset(int dim, PrimExpr offset_i) { top()->UpdateOffset(dim, offset_i); }
 
  public:
   std::vector<Scope> stack_;
@@ -407,8 +410,8 @@ class IndexTransformer : public StmtExprMutator {
     // the index might not be a single var node, use visitor to recursive construct the coordinate.
     PrimExpr coordinate = ExprMutator::VisitExpr(index);
     const Axis& axis = sp_buf_ctx_.GetAxis(dim);
-    // register to sparse buffer scope
-    sp_buf_ctx_.Register(dim, coordinate, index);
+    // update axis match information.
+    sp_buf_ctx_.UpdateMatch(dim, index);
 
     PrimExpr offset = index;
     // compress coordinate to index on sparse buffer axis.
@@ -435,9 +438,7 @@ class IndexTransformer : public StmtExprMutator {
     }
 
     // update offset
-    PrimExpr new_offset = AggregateOffset(sp_buf_ctx_.top()->offsets_.back(), axis,
-                                          offset, sp_buf_ctx_.ana_);
-    sp_buf_ctx_.top()->offsets_.push_back(std::move(new_offset));
+    sp_buf_ctx_.UpdateOffset(dim, offset);
     return offset;
   }
 
