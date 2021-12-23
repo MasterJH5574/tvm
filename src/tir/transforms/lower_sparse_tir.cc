@@ -413,6 +413,30 @@ class IndexTransformer : public StmtExprMutator {
         }
         return false;
       }
+
+      bool NeedCreateNewBlock(const Axis& axis, const Map<Axis, Var>& axis2loop_var,
+                              const std::unordered_set<const VarNode*>& defined_loop_vars,
+                              const SparseBlockNode* p_sp_block) {
+        if (axis->kind() != AxisKind::kDenseVariable && axis->kind() != AxisKind::kSparseVariable) {
+          return false;
+        }
+
+        SparseBlock sp_block = GetRef<SparseBlock>(p_sp_block);
+        Axis parent_axis = axis->GetParentAxis().value();
+        Optional<Var> loop_var = axis2loop_var.Get(parent_axis);
+        CHECK(loop_var.defined()) << "ValueError: The parent axis of " << axis
+                                  << "does not appear in sparse block " << sp_block;
+
+        if (LoopVarAppears(loop_var.value())) {
+          /* parent node is in the current block, need to create new block. */
+          return true;
+        } else {
+          CHECK(defined_loop_vars.count(loop_var.value().get()))
+              << "ValueError: The parent axis of " << axis
+              << " should appear before it in sparse block " << sp_block;
+          return false;
+        }
+      }
     };
 
     int n_iter = static_cast<int>(sp_block->sp_iter_vars.size());
@@ -448,25 +472,7 @@ class IndexTransformer : public StmtExprMutator {
       Var loop_var = Downcast<Var>(var_map.Get(sp_it_var->var));
       Axis axis = sp_it_var->axis;
 
-      bool create_new_blk = false;
-      if (axis->kind() == AxisKind::kDenseVariable || axis->kind() == AxisKind::kSparseVariable) {
-        Axis parent_axis = axis->GetParentAxis().value();
-        Optional<Var> loop_var = axis2loop_var.Get(parent_axis);
-        CHECK(loop_var.defined()) << "ValueError: The parent axis of " << axis
-                                  << "does not appear in sparse block "
-                                  << GetRef<SparseBlock>(sp_block);
-
-        if (block_infos.back().LoopVarAppears(loop_var.value())) {
-          /* parent node is in the current block, need to create new block. */
-          create_new_blk = true;
-        } else {
-          CHECK(defined_loop_vars.count(loop_var.value().get()))
-              << "ValueError: The parent axis of " << axis
-              << " should appear before it in sparse block " << GetRef<SparseBlock>(sp_block);
-        }
-      }
-
-      if (create_new_blk) {
+      if (block_infos.back().NeedCreateNewBlock(axis, axis2loop_var, defined_loop_vars, sp_block)) {
         /* update in stack set. */
         for (const Var& loop_var : block_infos.back().loop_vars) {
           defined_loop_vars.insert(loop_var.get());
