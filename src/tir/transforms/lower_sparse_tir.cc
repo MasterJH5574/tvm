@@ -324,38 +324,28 @@ class IndexTransformer : public StmtExprMutator {
    * \param index The PrimExpr representing the index on this dimension.
    */
   PrimExpr ViewIndexInAxis(int dim, PrimExpr index) {
+    // update axis match information.
+    sp_buf_ctx_.UpdateMatch(dim, index);
+    if (sp_buf_ctx_.MatchWithSpBlock(dim)) {
+      return index;
+    }
+
     // decompress index to coordinate on iterator axis.
     // the index might not be a single var node, use visitor to recursive construct the coordinate.
     PrimExpr coordinate = ExprMutator::VisitExpr(index);
     const Axis& axis = sp_buf_ctx_.GetAxis(dim);
-    // update axis match information.
-    sp_buf_ctx_.UpdateMatch(dim, index);
 
-    PrimExpr offset = index;
-    // compress coordinate to index on sparse buffer axis.
-    if (!sp_buf_ctx_.MatchWithSpBlock(dim)) {
-      switch (axis->kind()) {
-        case AxisKind::kDenseFixed:
-        case AxisKind::kDenseVariable:
-          offset = coordinate;
-          break;
-        case AxisKind::kSparseFixed: {
-          auto sf_axis = axis.as<SparseFixedAxisNode>();
-          PrimExpr l, r;
-          std::tie(l, r) = sp_buf_ctx_.GetIndicesRange(dim);
-          offset = lower_bound(sf_axis->indices->data, coordinate, l, r) - l;
-          break;
-        }
-        case AxisKind::kSparseVariable:
-          auto sv_axis = axis.as<SparseVariableAxisNode>();
-          PrimExpr l, r;
-          std::tie(l, r) = sp_buf_ctx_.GetIndicesRange(dim);
-          offset = lower_bound(sv_axis->indices->data, coordinate, l, r) - l;
-          break;
-      }
+    if (axis->kind() == AxisKind::kDenseFixed || axis->kind() == AxisKind::kDenseVariable) {
+      return coordinate;
+    } else {
+      PrimExpr l, r;
+      std::tie(l, r) = sp_buf_ctx_.GetIndicesRange(dim);
+
+      Buffer indices = axis->kind() == AxisKind::kSparseFixed
+                           ? Downcast<SparseFixedAxis>(axis)->indices
+                           : Downcast<SparseVariableAxis>(axis)->indices;
+      return lower_bound(indices->data, coordinate, l, r) - l;
     }
-
-    return offset;
   }
 
   /*!
