@@ -428,12 +428,11 @@ class IndexTransformer : public StmtExprMutator {
     Stmt body = VisitStmt(sp_block->body);
 
     // Step 3. Create the new loop vars.
-    std::unordered_map<const VarNode*, PrimExpr> var_map;  // Todo: change to Map?
+    Map<Var, PrimExpr> var_map;
     Map<Axis, Var> axis2loop_var;
-    var_map.reserve(n_iter);
     for (const SpIterVar& sp_iter_var : sp_block->sp_iter_vars) {
       Var loop_var("v_" + sp_iter_var->var->name_hint);
-      var_map[sp_iter_var->var.get()] = loop_var;
+      var_map.Set(sp_iter_var->var, loop_var);
       axis2loop_var.Set(sp_iter_var->axis, loop_var);
     }
 
@@ -446,7 +445,7 @@ class IndexTransformer : public StmtExprMutator {
 
     for (int i = 0; i < n_iter; ++i) {
       SpIterVar sp_it_var = sp_block->sp_iter_vars[i];
-      Var loop_var = Downcast<Var>(var_map[sp_it_var->var.get()]);
+      Var loop_var = Downcast<Var>(var_map.Get(sp_it_var->var));
       Axis axis = sp_it_var->axis;
 
       bool create_new_blk = false;
@@ -520,8 +519,7 @@ class IndexTransformer : public StmtExprMutator {
    * \param var_map The mapping from sparse iterable variable to corresponding ordinary iterable
    * variable.
    */
-  IterVar SpIterVarToIterVar(SpIterVar sp_iter,
-                             const std::unordered_map<const VarNode*, PrimExpr>& var_map) {
+  IterVar SpIterVarToIterVar(SpIterVar sp_iter, const Map<Var, PrimExpr>& var_map) {
     PrimExpr extent{nullptr};
     switch (sp_iter->axis->kind()) {
       case AxisKind::kDenseFixed: {
