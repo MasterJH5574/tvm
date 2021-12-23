@@ -246,13 +246,13 @@ class SparseBufferCtx {
                    arith::Analyzer* ana)
         : buf_name(std::move(buf_name)), axes(std::move(axes)), sp_blk_ctx(sp_blk_ctx), ana(ana) {
       offsets.emplace_back(Integer(0));
-      matches.emplace_back(true);
+      n_matched_iters = 0;
     }
 
     String buf_name;
     Array<Axis> axes;
     std::vector<PrimExpr> offsets;
-    std::vector<bool> matches;
+    int n_matched_iters;
     const SparseBlockCtx* sp_blk_ctx;
     arith::Analyzer* ana;
   };
@@ -272,7 +272,10 @@ class SparseBufferCtx {
   Axis GetAxis(int dim) const { return top()->axes[dim]; }
 
   /*! \brief call MatchWithSpBlock in top scope. */
-  const inline bool MatchWithSpBlock() const { return top()->matches.back(); }
+  const inline bool MatchWithSpBlock(int dim) const {
+    LOG(INFO) << "n_matched = " << top()->n_matched_iters << ", dim = " << dim;
+    return top()->n_matched_iters > dim;
+  }
 
   /*! \brief return the indices range of the given dimension in current buffer. */
   std::tuple<PrimExpr, PrimExpr> GetIndicesRange(int dim) {
@@ -282,25 +285,15 @@ class SparseBufferCtx {
   }
 
   /*! \brief update axis match information at dimension dim */
-  void UpdateMatch(int dim, PrimExpr orig_idx) {
+  void UpdateMatch(int dim, PrimExpr index) {
     ICHECK(dim + 1 == int(top()->offsets.size()))
         << "Cannot register coordinate of index " << std::to_string(dim) << " at this time";
     const Axis& axis = GetAxis(dim);
 
-    // update matches boolean array
-    if (!top()->matches.back()) {
-      // previous axis doesn't match.
-      top()->matches.emplace_back(false);
-    } else {
-      const VarNode* node = orig_idx.as<VarNode>();
-      auto it = top()->sp_blk_ctx->GetSparseIterVar(node);
-      if (!it.defined()) {
-        // current coordinate is not a single sparse iter var
-        top()->matches.emplace_back(false);
-      } else {
-        const SpIterVar& sp_iter_var = it.value();
-        // whether the axis current coordinate refers to matches the corresponding sparse buffer.
-        top()->matches.emplace_back(axis->name == sp_iter_var->axis->name);
+    if (const auto* var = index.as<VarNode>()) {
+      Optional<SpIterVar> sp_iter = top()->sp_blk_ctx->GetSparseIterVar(var);
+      if (sp_iter.defined() && sp_iter.value()->axis.same_as(axis)) {
+        ++(top()->n_matched_iters);
       }
     }
   }
@@ -350,7 +343,7 @@ class IndexTransformer : public StmtExprMutator {
 
     PrimExpr offset = index;
     // compress coordinate to index on sparse buffer axis.
-    if (!sp_buf_ctx_.MatchWithSpBlock()) {
+    if (!sp_buf_ctx_.MatchWithSpBlock(dim)) {
       switch (axis->kind()) {
         case AxisKind::kDenseFixed:
         case AxisKind::kDenseVariable:
