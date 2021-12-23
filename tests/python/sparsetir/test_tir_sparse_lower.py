@@ -649,6 +649,7 @@ def test_bmm():
     # TODO
 
 
+@pytest.mark.skip(reason="Under implementation")
 def test_sddmm():
     mod = tvm.IRModule.from_expr(sddmm)
     mod = tvm.tir.transform.LowerSparseTIR()(mod)
@@ -656,6 +657,7 @@ def test_sddmm():
     # TODO
 
 
+@pytest.mark.skip(reason="Under implementation")
 def test_fused_sddmm():
     mod = tvm.IRModule.from_expr(fused_sddmm)
     print(mod['main'].script())
