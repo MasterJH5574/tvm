@@ -127,25 +127,20 @@ PrimExpr AggregateOffset(PrimExpr prev_offset, Axis axis, PrimExpr index,
 class SparseBlockCtx {
  private:
   struct Scope {
-    explicit Scope(String blk_name, Array<SpIterVar> sp_iter_vars, arith::Analyzer* ana)
-        : blk_name_(std::move(blk_name)), ana_(ana) {
+    explicit Scope(String block_name, const Array<SpIterVar>& sp_iters, arith::Analyzer* ana)
+        : block_name(std::move(block_name)), ana(ana) {
       // initialize sparse iter var dependency map.
-      for (const SpIterVar& sp_iter_var : sp_iter_vars) {
-        axis_to_sp_iter_var_[sp_iter_var->axis.get()] = sp_iter_var;
-        sp_iter_var_map_[sp_iter_var->var.get()] = sp_iter_var;
+      for (const SpIterVar& sp_iter_var : sp_iters) {
+        axis2sp_iter.Set(sp_iter_var->axis, sp_iter_var);
+        sp_iter_var_map.Set(sp_iter_var->var, sp_iter_var);
       }
     }
 
-    /*!
-     * \brief Get the current block name.
-     */
-    const String GetBlockName() const { return blk_name_; }
-
-    std::unordered_map<const VarNode*, SpIterVar> sp_iter_var_map_;
-    std::unordered_map<const SpIterVarNode*, PrimExpr> offset_;
-    std::unordered_map<const AxisNode*, SpIterVar> axis_to_sp_iter_var_;
-    String blk_name_;
-    arith::Analyzer* ana_;
+    Map<Var, SpIterVar> sp_iter_var_map;
+    Map<SpIterVar, PrimExpr> cached_offsets;
+    Map<Axis, SpIterVar> axis2sp_iter;
+    String block_name;
+    arith::Analyzer* ana;
   };
 
  public:
@@ -167,20 +162,13 @@ class SparseBlockCtx {
    * NullOpt.
    */
   Optional<SpIterVar> GetSparseIterVar(const VarNode* var) const {
-    auto it = top()->sp_iter_var_map_.find(var);
-    if (it != top()->sp_iter_var_map_.end()) {
-      return it->second;
-    } else {
-      return NullOpt;
-    }
+    return top()->sp_iter_var_map.Get(GetRef<Var>(var));
   }
 
-  Optional<SpIterVar> GetParentSpIterVar(SpIterVar sp_iter_var) {
-    Axis axis = std::move(sp_iter_var->axis);
-    auto parent = axis->GetParentAxis();
-    if (parent.defined()) {
-      Axis parent_ = parent.value();
-      return top()->axis_to_sp_iter_var_[parent_.get()];
+  Optional<SpIterVar> GetParentSpIterVar(SpIterVar sp_iter) {
+    Optional<Axis> parent_axis = sp_iter->axis->GetParentAxis();
+    if (parent_axis.defined()) {
+      return top()->axis2sp_iter.Get(parent_axis.value());
     } else {
       return NullOpt;
     }
@@ -191,18 +179,15 @@ class SparseBlockCtx {
    * \param sp_iter_var The sparse iter var to lookup.
    * \return A PrimExpr representing the offset.
    */
-  PrimExpr GetOffset(Optional<SpIterVar> sp_iter_var) {
-    if (!sp_iter_var.defined()) {
-      return Integer(0);
-    }
-    SpIterVar sp_iter_var_ = sp_iter_var.value();
-    auto it = top()->offset_.find(sp_iter_var_.get());
-    if (it != top()->offset_.end()) {
-      return it->second;
+  PrimExpr GetOffset(SpIterVar sp_iter_var) {
+    Optional<PrimExpr> offset = top()->cached_offsets.Get(sp_iter_var);
+    if (offset.defined()) {
+      return offset.value();
     } else {
-      PrimExpr prev_off = GetOffset(GetParentSpIterVar(sp_iter_var_));
-      PrimExpr new_off = AggregateOffset(prev_off, sp_iter_var_->axis, sp_iter_var_->var, ana_);
-      top()->offset_[sp_iter_var_.get()] = new_off;
+      Optional<SpIterVar> parent_sp_iter = GetParentSpIterVar(sp_iter_var);
+      PrimExpr prev_off = parent_sp_iter.defined() ? GetOffset(parent_sp_iter.value()) : Integer(0);
+      PrimExpr new_off = AggregateOffset(prev_off, sp_iter_var->axis, sp_iter_var->var, ana_);
+      top()->cached_offsets.Set(sp_iter_var, new_off);
       return new_off;
     }
   }
@@ -234,15 +219,15 @@ class SparseBlockCtx {
    * \return A tuple of PrimExpr, the first elements refers to the start position, and the second
    * elements refers the end position.
    */
-  std::tuple<PrimExpr, PrimExpr> GetIndicesRange(SpIterVar sp_iter_var) {
-    PrimExpr prev_off = GetOffset(GetParentSpIterVar(sp_iter_var));
-    const Axis& axis = sp_iter_var->axis;
-    return {AggregateOffset(prev_off, axis, Integer(0), ana_),
-            AggregateOffset(add(prev_off, 1), axis, Integer(0), ana_)};
+  PrimExpr GetIterExtent(SpIterVar sp_iter_var) {
+    Optional<SpIterVar> parent_sp_iter = GetParentSpIterVar(sp_iter_var);
+    PrimExpr prev_off = parent_sp_iter.defined() ? GetOffset(parent_sp_iter.value()) : Integer(0);
+    return sub(AggregateOffset(add(prev_off, 1), sp_iter_var->axis, Integer(0), ana_),
+               AggregateOffset(prev_off, sp_iter_var->axis, Integer(0), ana_));
   }
 
   /*! \brief call GetBlockName in the top scope. */
-  const String GetBlockName() const { return top()->GetBlockName(); }
+  const String GetBlockName() const { return top()->block_name; }
 
  private:
   std::vector<Scope> stack_;
@@ -255,41 +240,21 @@ class SparseBlockCtx {
 /*! \brief Storing the context information of a sparse buffer. */
 class SparseBufferCtx {
  public:
-  class Scope {
-   public:
-    /*! \brief move constructor */
-    explicit Scope(Scope&& other)
-        : buf_name_(std::move(other.buf_name_)),
-          axes_(std::move(other.axes_)),
-          offsets_(std::move(other.offsets_)),
-          matches_(std::move(other.matches_)),
-          sp_blk_ctx_(std::move(other.sp_blk_ctx_)),
-          ana_(std::move(other.ana_)) {}
-
+  struct Scope {
     /*! \brief default constructor */
     explicit Scope(String buf_name, Array<Axis> axes, const SparseBlockCtx* sp_blk_ctx,
                    arith::Analyzer* ana)
-        : buf_name_(std::move(buf_name)),
-          axes_(std::move(axes)),
-          sp_blk_ctx_(sp_blk_ctx),
-          ana_(ana) {
-      offsets_.emplace_back(Integer(0));
-      matches_.emplace_back(true);
+        : buf_name(std::move(buf_name)), axes(std::move(axes)), sp_blk_ctx(sp_blk_ctx), ana(ana) {
+      offsets.emplace_back(Integer(0));
+      matches.emplace_back(true);
     }
 
-    /*! \brief get the axis given dimension index of current buffer. */
-    Axis GetAxis(int dim) const { return axes_[dim]; }
-
-    /*! \brief whether the index access pattern of current buffer aligns with current block */
-    const inline bool MatchWithSpBlock() const { return matches_.back(); }
-
-   public:
-    String buf_name_;
-    Array<Axis> axes_;
-    std::vector<PrimExpr> offsets_;
-    std::vector<bool> matches_;
-    const SparseBlockCtx* sp_blk_ctx_;
-    arith::Analyzer* ana_;
+    String buf_name;
+    Array<Axis> axes;
+    std::vector<PrimExpr> offsets;
+    std::vector<bool> matches;
+    const SparseBlockCtx* sp_blk_ctx;
+    arith::Analyzer* ana;
   };
 
   /*! \brief default constructor */
@@ -304,50 +269,51 @@ class SparseBufferCtx {
   void ExitScope() { stack_.pop_back(); }
 
   /*! \brief call GetAxis in top scope. */
-  Axis GetAxis(int dim) const { return top()->GetAxis(dim); }
+  Axis GetAxis(int dim) const { return top()->axes[dim]; }
 
   /*! \brief call MatchWithSpBlock in top scope. */
-  const inline bool MatchWithSpBlock() const { return top()->MatchWithSpBlock(); }
+  const inline bool MatchWithSpBlock() const { return top()->matches.back(); }
 
   /*! \brief return the indices range of the given dimension in current buffer. */
   std::tuple<PrimExpr, PrimExpr> GetIndicesRange(int dim) {
-    const Axis& axis = top()->axes_[dim];
-    return {AggregateOffset(top()->offsets_[dim], axis, Integer(0), ana_),
-            AggregateOffset(add(top()->offsets_[dim], 1), axis, Integer(0), ana_)};
+    const Axis& axis = top()->axes[dim];
+    return {AggregateOffset(top()->offsets[dim], axis, Integer(0), ana_),
+            AggregateOffset(add(top()->offsets[dim], 1), axis, Integer(0), ana_)};
   }
 
   /*! \brief update axis match information at dimension dim */
   void UpdateMatch(int dim, PrimExpr orig_idx) {
-    ICHECK(dim + 1 == int(top()->offsets_.size()))
+    ICHECK(dim + 1 == int(top()->offsets.size()))
         << "Cannot register coordinate of index " << std::to_string(dim) << " at this time";
     const Axis& axis = GetAxis(dim);
 
     // update matches boolean array
-    if (!top()->matches_.back()) {
+    if (!top()->matches.back()) {
       // previous axis doesn't match.
-      top()->matches_.emplace_back(false);
+      top()->matches.emplace_back(false);
     } else {
       const VarNode* node = orig_idx.as<VarNode>();
-      auto it = top()->sp_blk_ctx_->GetSparseIterVar(node);
+      auto it = top()->sp_blk_ctx->GetSparseIterVar(node);
       if (!it.defined()) {
         // current coordinate is not a single sparse iter var
-        top()->matches_.emplace_back(false);
+        top()->matches.emplace_back(false);
       } else {
         const SpIterVar& sp_iter_var = it.value();
         // whether the axis current coordinate refers to matches the corresponding sparse buffer.
-        top()->matches_.emplace_back(axis->name == sp_iter_var->axis->name);
+        top()->matches.emplace_back(axis->name == sp_iter_var->axis->name);
       }
     }
   }
 
   /*! \brief call UpdateOffset in top scope. */
-  void UpdateOffset(int dim, PrimExpr offset_i) {
+  PrimExpr UpdateOffset(int dim, PrimExpr offset_i) {
     const Axis& axis = GetAxis(dim);
-    PrimExpr new_offset = AggregateOffset(top()->offsets_.back(), axis, offset_i, ana_);
-    top()->offsets_.emplace_back(std::move(new_offset));
+    PrimExpr new_offset = AggregateOffset(top()->offsets.back(), axis, offset_i, ana_);
+    top()->offsets.emplace_back(new_offset);
+    return new_offset;
   }
 
- public:  // Todo
+ private:
   std::vector<Scope> stack_;
   arith::Analyzer* ana_;
 
@@ -368,6 +334,7 @@ class IndexTransformer : public StmtExprMutator {
   SparseBlockCtx sp_blk_ctx_;
   // Sparse buffer context stack;
   SparseBufferCtx sp_buf_ctx_;
+
   /*!
    * \brief Return the offset of index on given dimension.
    * \param dim The dimension index.
@@ -405,8 +372,6 @@ class IndexTransformer : public StmtExprMutator {
       }
     }
 
-    // update offset
-    sp_buf_ctx_.UpdateOffset(dim, offset);
     return offset;
   }
 
@@ -421,10 +386,7 @@ class IndexTransformer : public StmtExprMutator {
 
     PrimExpr offset = Integer(0);
     for (int i = 0; i < num_lowered_indices; ++i) {
-      const Axis& axis = sp_buffer->axes[i];
-      const PrimExpr& index = indices[i];
-
-      offset = AggregateOffset(offset, axis, ViewIndexInAxis(i, index), &ana_);
+      offset = sp_buf_ctx_.UpdateOffset(i, ViewIndexInAxis(i, indices[i]));
     }
     return offset;
   }
@@ -629,32 +591,30 @@ class IndexTransformer : public StmtExprMutator {
    * \param var_map The mapping from sparse iterable variable to corresponding ordinary iterable
    * variable.
    */
-  IterVar SpIterVarToIterVar(SpIterVar sp_iter_var,
+  IterVar SpIterVarToIterVar(SpIterVar sp_iter,
                              const std::unordered_map<const VarNode*, PrimExpr>& var_map) {
     PrimExpr extent{nullptr};
-    AxisKind kind = sp_iter_var->axis->kind();
+    AxisKind kind = sp_iter->axis->kind();
     switch (kind) {
       case AxisKind::kDenseFixed: {
-        extent = sp_iter_var->max_extent;
+        extent = sp_iter->max_extent;
         break;
       }
       case AxisKind::kSparseFixed: {
-        const auto sp_fixed_axis = (sp_iter_var->axis).as<SparseFixedAxisNode>();
+        const auto* sp_fixed_axis = sp_iter->axis.as<SparseFixedAxisNode>();
         extent = sp_fixed_axis->nnz_cols;
         break;
       }
       case AxisKind::kDenseVariable:
       case AxisKind::kSparseVariable: {
-        PrimExpr l, r;
-        std::tie(l, r) = sp_blk_ctx_.GetIndicesRange(sp_iter_var);
-        extent = sub(r, l);
+        extent = sp_blk_ctx_.GetIterExtent(sp_iter);
         break;
       }
     }
 
     // Substitute the iteration vars in the expression with the loop vars.
-    return IterVar(Range::FromMinExtent(0, Substitute(std::move(extent), var_map)),
-                   sp_iter_var->var, sp_iter_var->is_reduction ? kCommReduce : kDataPar);
+    return IterVar(Range::FromMinExtent(0, Substitute(std::move(extent), var_map)), sp_iter->var,
+                   sp_iter->is_reduction ? kCommReduce : kDataPar);
   }
 
   /*!
