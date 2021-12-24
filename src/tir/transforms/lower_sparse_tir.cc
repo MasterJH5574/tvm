@@ -95,18 +95,18 @@ PrimExpr AggregateOffset(PrimExpr prev_offset, Axis axis, PrimExpr index, arith:
       break;
     }
     case AxisKind::kSparseFixed: {
-      auto sf_axis = axis.as<SparseFixedAxisNode>();
+      const auto* sf_axis = axis.as<SparseFixedAxisNode>();
       new_offset = std::move(prev_offset) * sf_axis->nnz_cols + std::move(index);
       break;
     }
     case AxisKind::kDenseVariable: {
       // TODO(zihao): finish the aggregating offset for attached axis.
-      auto dv_axis = axis.as<DenseVariableAxisNode>();
+      const auto* dv_axis = axis.as<DenseVariableAxisNode>();
       new_offset = add(BufferLoad(dv_axis->indptr, {std::move(prev_offset)}), std::move(index));
       break;
     }
     case AxisKind::kSparseVariable: {
-      auto sv_axis = axis.as<SparseVariableAxisNode>();
+      const auto* sv_axis = axis.as<SparseVariableAxisNode>();
       new_offset = add(BufferLoad(sv_axis->indptr, {std::move(prev_offset)}), std::move(index));
       break;
     }
