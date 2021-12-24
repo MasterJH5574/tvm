@@ -68,7 +68,6 @@ Map<Var, Buffer> UpdateBufferMap(PrimFunc f) {
           buffer_map_.Set(params[0], sp_buffer->data);
         }
       }
-      return;
     }
 
     Map<Var, Buffer> buffer_map_;
@@ -167,9 +166,8 @@ class SparseBlockCtx {
     const Optional<Axis>& parent_axis = sp_iter->axis->GetParentAxis();
     if (parent_axis.defined()) {
       return top()->axis2sp_iter.Get(parent_axis.value());
-    } else {
-      return NullOpt;
     }
+    return NullOpt;
   }
 
   /*!
@@ -178,16 +176,15 @@ class SparseBlockCtx {
    * \return The offset of the sparse iterator.
    */
   PrimExpr GetOffset(const SpIterVar& sp_iter) {
-    const Optional<PrimExpr>& offset = top()->cached_offsets.Get(sp_iter);
+    Optional<PrimExpr> offset = top()->cached_offsets.Get(sp_iter);
     if (offset.defined()) {
-      return offset.value();
-    } else {
-      const Optional<SpIterVar>& parent_sp_iter = GetParentSpIterVar(sp_iter);
-      PrimExpr prev_ofs = parent_sp_iter.defined() ? GetOffset(parent_sp_iter.value()) : Integer(0);
-      PrimExpr new_ofs = AggregateOffset(std::move(prev_ofs), sp_iter->axis, sp_iter->var, ana_);
-      top()->cached_offsets.Set(sp_iter, new_ofs);
-      return new_ofs;
+      return std::move(offset.value());
     }
+    const Optional<SpIterVar>& parent_sp_iter = GetParentSpIterVar(sp_iter);
+    PrimExpr prev_ofs = parent_sp_iter.defined() ? GetOffset(parent_sp_iter.value()) : Integer(0);
+    PrimExpr new_ofs = AggregateOffset(std::move(prev_ofs), sp_iter->axis, sp_iter->var, ana_);
+    top()->cached_offsets.Set(sp_iter, new_ofs);
+    return new_ofs;
   }
 
   /*!
@@ -195,11 +192,11 @@ class SparseBlockCtx {
    * \param sp_iter The sparse iterator to be queried.
    * \return The coordinate of the sparse iterator.
    */
-  PrimExpr GetCoordinate(SpIterVar sp_iter) {
+  PrimExpr GetCoordinate(const SpIterVar& sp_iter) {
     const Axis& axis = sp_iter->axis;
     AxisKind kind = axis->kind();
     if (kind == AxisKind::kDenseFixed || kind == AxisKind::kDenseVariable) {
-      // if dense, just return the value.
+      // If dense, just return the value.
       return sp_iter->var;
     }
 
@@ -217,8 +214,9 @@ class SparseBlockCtx {
    * \return The iteration extent of the input sparse iterator.
    */
   PrimExpr GetIterExtent(SpIterVar sp_iter) {
-    Optional<SpIterVar> parent_sp_iter = GetParentSpIterVar(sp_iter);
-    PrimExpr prev_off = parent_sp_iter.defined() ? GetOffset(parent_sp_iter.value()) : Integer(0);
+    const Optional<SpIterVar>& parent_sp_iter = GetParentSpIterVar(sp_iter);
+    const PrimExpr& prev_off =
+        parent_sp_iter.defined() ? GetOffset(parent_sp_iter.value()) : Integer(0);
     return ana_->Simplify(sub(AggregateOffset(add(prev_off, 1), sp_iter->axis, Integer(0), ana_),
                               AggregateOffset(prev_off, sp_iter->axis, Integer(0), ana_)));
   }
@@ -312,14 +310,17 @@ class SparseBufferAccessCtx {
    * \brief Update the accumulative offset of this buffer access.
    * \param index The index used to update.
    * \param dim The dimension where the index is.
-   * \return The offset at the input dimension.
    */
-  PrimExpr UpdateOffset(PrimExpr index, int dim) {
-    const Axis& axis = GetAxis(dim);
-    PrimExpr new_offset = AggregateOffset(top()->offsets.back(), axis, std::move(index), ana_);
-    top()->offsets.push_back(new_offset);
-    return new_offset;
+  void UpdateOffset(PrimExpr index, int dim) {
+    top()->offsets.push_back(
+        AggregateOffset(top()->offsets.back(), GetAxis(dim), std::move(index), ana_));
   }
+
+  /*!
+   * \brief Get the last accumulative offset of this buffer access.
+   * \return The accumulative offset
+   */
+  PrimExpr GetLastOffset() { return top()->offsets.back(); }
 
  private:
   std::vector<Scope> stack_;
@@ -375,14 +376,12 @@ class IndexTransformer : public StmtExprMutator {
    * \param sp_buffer The sparse buffer to be accessed.
    * \param indices The access indices.
    */
-  PrimExpr ComputeOffset(SparseBuffer sp_buffer, Array<PrimExpr> indices) {
+  PrimExpr ComputeOffset(const SparseBuffer& sp_buffer, const Array<PrimExpr>& indices) {
     ICHECK_EQ(static_cast<int>(indices.size()), sp_buffer->ndim());
-
-    PrimExpr offset = Integer(0);
     for (int i = 0; i < sp_buffer->ndim(); ++i) {
-      offset = sp_buf_ctx_.UpdateOffset(ViewIndexInAxis(indices[i], i), i);
+      sp_buf_ctx_.UpdateOffset(ViewIndexInAxis(indices[i], i), i);
     }
-    return offset;
+    return sp_buf_ctx_.GetLastOffset();
   }
 
   /*!
@@ -391,7 +390,7 @@ class IndexTransformer : public StmtExprMutator {
    * \param var_map The mapping from sparse iterators to loop variables, for extent substitution.
    * \return The corresponding block iterator.
    */
-  IterVar SpIterVarToIterVar(SpIterVar sp_iter, const Map<Var, PrimExpr>& var_map) {
+  IterVar SpIterVarToIterVar(const SpIterVar& sp_iter, const Map<Var, PrimExpr>& var_map) {
     // Substitute the iteration vars in the expression with the loop vars.
     return IterVar(Range::FromMinExtent(0, Substitute(sp_blk_ctx_.GetIterExtent(sp_iter), var_map)),
                    sp_iter->var, sp_iter->is_reduction ? kCommReduce : kDataPar);
@@ -441,7 +440,7 @@ class IndexTransformer : public StmtExprMutator {
   }
 
   PrimExpr VisitExpr_(const VarNode* var) final {
-    Optional<SpIterVar> sp_iter = sp_blk_ctx_.GetSparseIterVar(var);
+    const Optional<SpIterVar>& sp_iter = sp_blk_ctx_.GetSparseIterVar(var);
     return sp_iter.defined() ? sp_blk_ctx_.GetCoordinate(sp_iter.value()) : GetRef<PrimExpr>(var);
   }
 
@@ -518,7 +517,7 @@ class IndexTransformer : public StmtExprMutator {
           return false;
         }
 
-        Optional<Var> loop_var = axis2loop_var.Get(axis->GetParentAxis().value());
+        const Optional<Var>& loop_var = axis2loop_var.Get(axis->GetParentAxis().value());
         CHECK(loop_var.defined()) << "ValueError: The parent axis of " << axis
                                   << "does not appear in the sparse block";
 
