@@ -422,20 +422,18 @@ class IndexTransformer : public StmtExprMutator {
         }
 
         SparseBlock sp_block = GetRef<SparseBlock>(p_sp_block);
-        Axis parent_axis = axis->GetParentAxis().value();
-        Optional<Var> loop_var = axis2loop_var.Get(parent_axis);
+        Optional<Var> loop_var = axis2loop_var.Get(axis->GetParentAxis().value());
         CHECK(loop_var.defined()) << "ValueError: The parent axis of " << axis
                                   << "does not appear in sparse block " << sp_block;
-
         if (LoopVarAppears(loop_var.value())) {
           /* parent node is in the current block, need to create new block. */
           return true;
-        } else {
-          CHECK(defined_loop_vars.count(loop_var.value().get()))
-              << "ValueError: The parent axis of " << axis
-              << " should appear before it in sparse block " << sp_block;
-          return false;
         }
+
+        CHECK(defined_loop_vars.count(loop_var.value().get()))
+            << "ValueError: The parent axis of " << axis
+            << " should appear before it in sparse block " << sp_block;
+        return false;
       }
     };
 
