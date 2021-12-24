@@ -216,8 +216,8 @@ class SparseBlockCtx {
   PrimExpr GetIterExtent(SpIterVar sp_iter) {
     Optional<SpIterVar> parent_sp_iter = GetParentSpIterVar(sp_iter);
     PrimExpr prev_off = parent_sp_iter.defined() ? GetOffset(parent_sp_iter.value()) : Integer(0);
-    return sub(AggregateOffset(add(prev_off, 1), sp_iter->axis, Integer(0), ana_),
-               AggregateOffset(prev_off, sp_iter->axis, Integer(0), ana_));
+    return ana_->Simplify(sub(AggregateOffset(add(prev_off, 1), sp_iter->axis, Integer(0), ana_),
+                              AggregateOffset(prev_off, sp_iter->axis, Integer(0), ana_)));
   }
 
  private:
@@ -526,27 +526,9 @@ class IndexTransformer : public StmtExprMutator {
    * variable.
    */
   IterVar SpIterVarToIterVar(SpIterVar sp_iter, const Map<Var, PrimExpr>& var_map) {
-    PrimExpr extent{nullptr};
-    switch (sp_iter->axis->kind()) {
-      case AxisKind::kDenseFixed: {
-        extent = sp_iter->max_extent;
-        break;
-      }
-      case AxisKind::kSparseFixed: {
-        const auto* sp_fixed_axis = sp_iter->axis.as<SparseFixedAxisNode>();
-        extent = sp_fixed_axis->nnz_cols;
-        break;
-      }
-      case AxisKind::kDenseVariable:
-      case AxisKind::kSparseVariable: {
-        extent = sp_blk_ctx_.GetIterExtent(sp_iter);
-        break;
-      }
-    }
-
     // Substitute the iteration vars in the expression with the loop vars.
-    return IterVar(Range::FromMinExtent(0, Substitute(std::move(extent), var_map)), sp_iter->var,
-                   sp_iter->is_reduction ? kCommReduce : kDataPar);
+    return IterVar(Range::FromMinExtent(0, Substitute(sp_blk_ctx_.GetIterExtent(sp_iter), var_map)),
+                   sp_iter->var, sp_iter->is_reduction ? kCommReduce : kDataPar);
   }
 
   /*!
