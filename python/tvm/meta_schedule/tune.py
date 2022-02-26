@@ -826,7 +826,7 @@ def tune_relax(
     target = Parse._target(target)
     database = Parse._database(database, task_name, work_dir)
     # parse the tuning contexts
-    for task in extracted_tasks[0:2]:
+    for task in extracted_tasks:
         assert len(task.dispatched) == 1, "Only size 1 dispatched task list is supported for now"
         tune_contexts.append(
             Parse._tune_context(

@@ -21,43 +21,84 @@ import tvm.meta_schedule as ms
 
 from tvm import relax
 from tvm import transform
-from tvm.target.target import Target
 from tvm.meta_schedule import tune_relax, EvolutionarySearchConfig
 
+from tvm.script import relax as R
 from tvm.relax.testing import relay_translator
 
 import os
-import time
+import logging
+import argparse
 import numpy as np
 
 
-num_total_trials = 2000
-# rpc_host = "172.16.2.241"
-# rpc_port = 4445
-# rpc_key = "amd-5900x"
-rpc_host = "127.0.0.1"
-rpc_port = 4446
-rpc_key = "local"
-
-rpc_config = ms.runner.RPCConfig(
-    tracker_host=rpc_host,
-    tracker_port=rpc_port,
-    tracker_key=rpc_key,
-    session_timeout_sec=30,
-)
-rpc_workers = rpc_config.count_num_servers(allow_missing=False)
-
-
-def test_resnet_cpu():
-    device = tvm.cpu(0)
-    target = Target("llvm --num-cores=16")
-    task_name = "resnet18-cpu-128"
-    work_dir = "/home/rhlai/tvm/tests/python/relax/resnet18-cpu"
-    rpc_runner = ms.runner.RPCRunner(
-        rpc_config=rpc_config,
-        alloc_repeat=3,
-        max_workers=rpc_workers,
+def _parse_args():
+    args = argparse.ArgumentParser()
+    args.add_argument(
+        "--model",
+        type=str,
+        required=True,
     )
+    args.add_argument(
+        "--target",
+        type=str,
+        required=True,
+    )
+    args.add_argument(
+        "--device",
+        type=str,
+        required=True,
+    )
+    args.add_argument(
+        "--num-trials",
+        type=int,
+        required=True,
+    )
+    args.add_argument(
+        "--work-dir",
+        type=str,
+        required=True,
+    )
+    args.add_argument(
+        "--rpc-host",
+        type=str,
+        required=True,
+    )
+    args.add_argument(
+        "--rpc-port",
+        type=int,
+        required=True,
+    )
+    args.add_argument(
+        "--rpc-key",
+        type=str,
+        required=True,
+    )
+    parsed = args.parse_args()
+    parsed.target = tvm.target.Target(parsed.target)
+    if parsed.target.attrs.get("mtriple", None) == "aarch64-linux-gnu":
+        parsed.alloc_repeat = 3
+    else:
+        parsed.alloc_repeat = 1
+    parsed.rpc_config = ms.runner.RPCConfig(
+        tracker_host=parsed.rpc_host,
+        tracker_port=parsed.rpc_port,
+        tracker_key=parsed.rpc_key,
+        session_timeout_sec=30,
+    )
+    parsed.rpc_workers = parsed.rpc_config.count_num_servers(allow_missing=False)
+    parsed.device = tvm.cpu() if parsed.device == "cpu" else tvm.cuda()
+    return parsed
+
+
+logging.basicConfig()
+logging.getLogger("tvm.meta_schedule").setLevel(logging.DEBUG)
+ARGS = _parse_args()
+
+
+def main():
+    task_name = ARGS.model
+    work_dir = ARGS.work_dir
 
     path_workload = os.path.join(work_dir, f"{task_name}_database_workload.json")
     path_tuning_record = os.path.join(work_dir, f"{task_name}_database_tuning_record.json")
@@ -70,7 +111,8 @@ def test_resnet_cpu():
     batch_size = 1
     image_shape = (3, 224, 224)
     input_shape = (batch_size,) + image_shape
-    relay_mod, _ = tvm.relay.testing.resnet.get_workload(
+
+    relay_mod, params = tvm.relay.testing.resnet.get_workload(
         num_layers=num_layers, image_shape=image_shape, batch_size=batch_size, dtype="float32"
     )
 
@@ -82,45 +124,51 @@ def test_resnet_cpu():
 
     tune_relax(
         mod=relax_mod,
-        target=target,
+        target=ARGS.target,
         config=EvolutionarySearchConfig(
             num_trials_per_iter=64,
-            num_trials_total=64,
+            num_trials_total=ARGS.num_trials,
         ),
-        runner=rpc_runner,
+        runner=ms.runner.RPCRunner(
+            rpc_config=ARGS.rpc_config,
+            alloc_repeat=3,
+            max_workers=ARGS.rpc_workers,
+        ),
+        database=database,
         task_name=task_name,
         work_dir=work_dir,
         num_threads=os.cpu_count(),
     )
 
     with transform.PassContext(opt_level=0):
-        ex_untuned, lib_untuned = relax.vm.build(relax_mod, target)
+        ex_untuned, lib_untuned = relax.vm.build(relax_mod, ARGS.target)
 
     with transform.PassContext(opt_level=3):
-        relax_mod_best = relax.transform.MetaScheduleApplyHistoryBest(database, target)(relax_mod)
-        ex_tuned, lib_tuned = relax.vm.build(relax_mod_best, target)
+        relax_mod_best = relax.transform.MetaScheduleApplyHistoryBest(database, ARGS.target)(
+            relax_mod
+        )
+        # print(R.parser.astext(relax_mod_best))
+        ex_tuned, lib_tuned = relax.vm.build(relax_mod_best, ARGS.target)
 
-    vm_untuned = relax.VirtualMachine(ex_untuned, device, mod=lib_untuned)
-    vm_tuned = relax.VirtualMachine(ex_tuned, device, mod=lib_tuned)
+    vm_untuned = relax.vm.VirtualMachine(ex_untuned, ARGS.device, mod=lib_untuned)
+    vm_tuned = relax.vm.VirtualMachine(ex_tuned, ARGS.device, mod=lib_tuned)
 
-    data = tvm.nd.array(np.random.randn(*input_shape).astype("float32"), device)
+    data = tvm.nd.array(np.random.randn(*input_shape).astype("float32"), ARGS.device)
 
-    def run_and_measure(vm, data):
-        time_begin = time.time()
-        print(type(vm["main"]))
-        res = vm["main"](data)
-        time_end = time.time()
-        duration = time_end - time_begin
+    def run_and_measure(vm: relax.vm.VirtualMachine, data, params):
+        res = vm["main"](data, *list(params.values()))
+        evaluator = vm.module.time_evaluator("main", ARGS.device, number=50)
+        duration = evaluator(data, *list(params.values()))
         return res, duration
 
-    res_untuned, time_untuned = run_and_measure(vm_untuned, data)
-    res_tuned, time_tuned = run_and_measure(vm_tuned, data)
+    res_untuned, time_untuned = run_and_measure(vm_untuned, data, params)
+    res_tuned, time_tuned = run_and_measure(vm_tuned, data, params)
 
     tvm.testing.assert_allclose(res_tuned.numpy(), res_untuned.numpy(), rtol=1e-4, atol=1e-4)
 
-    print(f"untuned resnet: {time_untuned}")
-    print(f"  tuned resnet: {time_tuned}")
+    print(f"untuned resnet:\n{time_untuned}")
+    print(f"  tuned resnet:\n{time_tuned}")
 
 
 if __name__ == "__main__":
-    test_resnet_cpu()
+    main()
