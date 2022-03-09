@@ -22,11 +22,14 @@ import tvm.meta_schedule as ms
 from tvm import relax
 from tvm import transform
 from tvm.meta_schedule import tune_relax, EvolutionarySearchConfig
+from tvm.meta_schedule.builder import BuilderInput, LocalBuilder
+from tvm.meta_schedule.runner import RunnerInput, EvaluatorConfig, RPCRunner
 
 from tvm.script import relax as R
 from tvm.relax.testing import relay_translator
 
 import os
+import itertools
 import logging
 import argparse
 import numpy as np
@@ -96,6 +99,33 @@ logging.getLogger("tvm.meta_schedule").setLevel(logging.DEBUG)
 ARGS = _parse_args()
 
 
+def f_build(mod, target, params):
+    with transform.PassContext(opt_level=3):
+        executable, mod = relax.vm.build(mod, target)
+    return (executable, mod)
+
+
+def f_run_evaluator(rt_mod, device, evaluator_config, repeated_args):
+    executable, mod = rt_mod
+    vm = relax.vm.VirtualMachine(executable, device, mod)
+    evaluator = vm.module.time_evaluator(
+        func_name="main",
+        dev=device,
+        number=evaluator_config.number,
+        repeat=evaluator_config.repeat,
+        min_repeat_ms=evaluator_config.min_repeat_ms,
+        f_preproc="cache_flush_cpu_non_first_arg"
+        if evaluator_config.enable_cpu_cache_flush
+        else "",
+    )
+    repeated_costs = []
+    for args in repeated_args:
+        profile_result = evaluator(*args)
+        repeated_costs.append(profile_result.results)
+    costs = [float(cost) for cost in itertools.chain.from_iterable(repeated_costs)]
+    return costs
+
+
 def main():
     task_name = ARGS.model
     work_dir = ARGS.work_dir
@@ -122,52 +152,88 @@ def main():
 
     # print(R.parser.astext(relax_mod))
 
-    tune_relax(
-        mod=relax_mod,
-        target=ARGS.target,
-        config=EvolutionarySearchConfig(
-            num_trials_per_iter=64,
-            num_trials_total=ARGS.num_trials,
-        ),
-        runner=ms.runner.RPCRunner(
-            rpc_config=ARGS.rpc_config,
-            alloc_repeat=3,
-            max_workers=ARGS.rpc_workers,
-        ),
-        database=database,
-        task_name=task_name,
-        work_dir=work_dir,
-        num_threads=os.cpu_count(),
+    # tune_relax(
+    #     mod=relax_mod,
+    #     target=ARGS.target,
+    #     config=EvolutionarySearchConfig(
+    #         num_trials_per_iter=64,
+    #         num_trials_total=ARGS.num_trials,
+    #     ),
+    #     runner=ms.runner.RPCRunner(
+    #         rpc_config=ARGS.rpc_config,
+    #         alloc_repeat=3,
+    #         max_workers=ARGS.rpc_workers,
+    #     ),
+    #     database=database,
+    #     task_name=task_name,
+    #     work_dir=work_dir,
+    #     num_threads=os.cpu_count(),
+    # )
+
+    builder = LocalBuilder(f_build=f_build)
+    builder_input = BuilderInput(relax_mod, ARGS.target, params)
+    builder_result = builder.build([builder_input])[0]
+    assert builder_result.error_msg is None, builder_result.error_msg
+    assert builder_result.artifact_path is not None
+
+    args_info = [ms.arg_info.TensorInfo("float32", input_shape)]
+    for param in params.values():
+        args_info.append(ms.arg_info.TensorInfo(param.dtype(), param.shape))
+    runner_input = RunnerInput(builder_result.artifact_path, str(ARGS.device)[:-3], args_info)
+
+    evaluator_config = EvaluatorConfig(
+        number=1,
+        repeat=10,
+        min_repeat_ms=100,
+        enable_cpu_cache_flush=False,
+    )
+    runner = RPCRunner(
+        rpc_config=ARGS.rpc_config,
+        evaluator_config=evaluator_config,
+        alloc_repeat=3,
+        max_workers=ARGS.rpc_workers,
+        f_run_evaluator=f_run_evaluator,
     )
 
-    with transform.PassContext(opt_level=0):
-        ex_untuned, lib_untuned = relax.vm.build(relax_mod, ARGS.target)
+    runner_future = runner.run([runner_input])[0]
+    runner_result = runner_future.result()
+    assert runner_result is not None
+    assert runner_result.error_msg is None, runner_result.error_msg
+    assert runner_result.run_secs is not None
 
-    with transform.PassContext(opt_level=3):
-        relax_mod_best = relax.transform.MetaScheduleApplyHistoryBest(database, ARGS.target)(
-            relax_mod
-        )
-        # print(R.parser.astext(relax_mod_best))
-        ex_tuned, lib_tuned = relax.vm.build(relax_mod_best, ARGS.target)
+    for result in runner_result.run_secs:
+        if isinstance(result, tvm.tir.FloatImm):
+            result = result.value
+        print(result)
 
-    vm_untuned = relax.vm.VirtualMachine(ex_untuned, ARGS.device, mod=lib_untuned)
-    vm_tuned = relax.vm.VirtualMachine(ex_tuned, ARGS.device, mod=lib_tuned)
+    # with transform.PassContext(opt_level=0):
+    #     ex_untuned, lib_untuned = relax.vm.build(relax_mod, ARGS.target)
 
-    data = tvm.nd.array(np.random.randn(*input_shape).astype("float32"), ARGS.device)
+    # with transform.PassContext(opt_level=3):
+    #     relax_mod_best = relax.transform.MetaScheduleApplyHistoryBest(database, ARGS.target)(
+    #         relax_mod
+    #     )
+    #     # print(R.parser.astext(relax_mod_best))
+    #     ex_tuned, lib_tuned = relax.vm.build(relax_mod_best, ARGS.target)
 
-    def run_and_measure(vm: relax.vm.VirtualMachine, data, params):
-        res = vm["main"](data, *list(params.values()))
-        evaluator = vm.module.time_evaluator("main", ARGS.device, number=50)
-        duration = evaluator(data, *list(params.values()))
-        return res, duration
+    # vm_untuned = relax.vm.VirtualMachine(ex_untuned, ARGS.device, mod=lib_untuned)
+    # vm_tuned = relax.vm.VirtualMachine(ex_tuned, ARGS.device, mod=lib_tuned)
 
-    res_untuned, time_untuned = run_and_measure(vm_untuned, data, params)
-    res_tuned, time_tuned = run_and_measure(vm_tuned, data, params)
+    # data = tvm.nd.array(np.random.randn(*input_shape).astype("float32"), ARGS.device)
 
-    tvm.testing.assert_allclose(res_tuned.numpy(), res_untuned.numpy(), rtol=1e-4, atol=1e-4)
+    # def run_and_measure(vm: relax.vm.VirtualMachine, data, params):
+    #     res = vm["main"](data, *list(params.values()))
+    #     evaluator = vm.module.time_evaluator("main", ARGS.device, number=50)
+    #     duration = evaluator(data, *list(params.values()))
+    #     return res, duration
 
-    print(f"untuned resnet:\n{time_untuned}")
-    print(f"  tuned resnet:\n{time_tuned}")
+    # res_untuned, time_untuned = run_and_measure(vm_untuned, data, params)
+    # res_tuned, time_tuned = run_and_measure(vm_tuned, data, params)
+
+    # tvm.testing.assert_allclose(res_tuned.numpy(), res_untuned.numpy(), rtol=1e-4, atol=1e-4)
+
+    # print(f"untuned resnet:\n{time_untuned}")
+    # print(f"  tuned resnet:\n{time_tuned}")
 
 
 if __name__ == "__main__":
