@@ -99,10 +99,27 @@ logging.getLogger("tvm.meta_schedule").setLevel(logging.DEBUG)
 ARGS = _parse_args()
 
 
+class ExecutorFactoryModule:
+    def __init__(
+        self,
+        executable,
+        module,
+        target,
+        params,
+    ):
+        self.executable = executable
+        self.module = module
+        self.target = target
+        self.params = params
+
+    def export_library(self, file_name, fcompile=None, addons=None, **kwargs):
+        return self.module.export_library(file_name, fcompile, addons, **kwargs)
+
+
 def f_build(mod, target, params):
     with transform.PassContext(opt_level=3):
         executable, mod = relax.vm.build(mod, target)
-    return (executable, mod)
+    return ExecutorFactoryModule(executable, mod, target, params)
 
 
 def f_run_evaluator(rt_mod, device, evaluator_config, repeated_args):
