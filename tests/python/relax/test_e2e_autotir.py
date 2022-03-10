@@ -99,32 +99,17 @@ logging.getLogger("tvm.meta_schedule").setLevel(logging.DEBUG)
 ARGS = _parse_args()
 
 
-class ExecutorFactoryModule:
-    def __init__(
-        self,
-        executable,
-        module,
-        target,
-        params,
-    ):
-        self.executable = executable
-        self.module = module
-        self.target = target
-        self.params = params
-
-    def export_library(self, file_name, fcompile=None, addons=None, **kwargs):
-        return self.module.export_library(file_name, fcompile, addons, **kwargs)
-
-
 def f_build(mod, target, params):
     with transform.PassContext(opt_level=3):
-        executable, mod = relax.vm.build(mod, target)
-    return ExecutorFactoryModule(executable, mod, target, params)
+        executable, mod = relax.vm.build(mod=mod, target=target)
+    mod.relax_executable = executable
+    return mod
 
 
 def f_run_evaluator(rt_mod, device, evaluator_config, repeated_args):
-    executable, mod = rt_mod
-    vm = relax.vm.VirtualMachine(executable, device, mod)
+    executable = rt_mod.relax_executable
+    mod = rt_mod
+    vm = relax.vm.VirtualMachine(exec=executable, device=device, mod=mod)
     evaluator = vm.module.time_evaluator(
         func_name="main",
         dev=device,
@@ -188,15 +173,19 @@ def main():
     # )
 
     builder = LocalBuilder(f_build=f_build)
-    builder_input = BuilderInput(relax_mod, ARGS.target, params)
+    builder_input = BuilderInput(mod=relax_mod, target=ARGS.target, params=params)
     builder_result = builder.build([builder_input])[0]
     assert builder_result.error_msg is None, builder_result.error_msg
     assert builder_result.artifact_path is not None
 
     args_info = [ms.arg_info.TensorInfo("float32", input_shape)]
     for param in params.values():
-        args_info.append(ms.arg_info.TensorInfo(param.dtype(), param.shape))
-    runner_input = RunnerInput(builder_result.artifact_path, str(ARGS.device)[:-3], args_info)
+        args_info.append(ms.arg_info.TensorInfo(dtype=param.dtype, shape=param.shape))
+    runner_input = RunnerInput(
+        artifact_path=builder_result.artifact_path,
+        device_type=ARGS.target.kind.name,
+        args_info=args_info,
+    )
 
     evaluator_config = EvaluatorConfig(
         number=1,
