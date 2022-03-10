@@ -103,22 +103,21 @@ ARGS = _parse_args()
 def f_build(mod, target, params):
     with transform.PassContext(opt_level=3):
         executable, mod = relax.vm.build(mod=mod, target=target)
-    mod.relax_executable = executable
     return mod
 
 
 def f_upload_module(session, local_path, remote_path):
+    exec_remote_path = "exec.tmp"
+    exec_local_path = os.path.join(str(Path(local_path).parent.absolute()), exec_remote_path)
     session.upload(local_path, remote_path)
+    session.upload(exec_local_path, exec_remote_path)
     rt_mod = session.load_module(remote_path)
-    exec_path = os.path.join(str(Path(local_path).parent.absolute()), "exec.tmp")
-    rt_mod.relax_executable = relax.vm.load_exec_from_file(exec_path)
-    return rt_mod
+    return rt_mod, relax.vm.load_exec_from_file(exec_remote_path)
 
 
 def f_run_evaluator(session, rt_mod, device, evaluator_config, repeated_args):
-    executable = rt_mod.relax_executable
-    mod = rt_mod
-    vm = relax.vm.VirtualMachine(exec=executable, device=device, mod=mod)
+    rt_mod, executable = rt_mod
+    vm = relax.vm.VirtualMachine(exec=executable, device=device, mod=rt_mod)
     evaluator = vm.module.time_evaluator(
         func_name="main",
         dev=device,
