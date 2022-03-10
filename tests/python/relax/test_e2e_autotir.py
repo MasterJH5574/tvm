@@ -33,6 +33,7 @@ import itertools
 import logging
 import argparse
 import numpy as np
+from pathlib import Path
 
 
 def _parse_args():
@@ -107,14 +108,14 @@ def f_build(mod, target, params):
 
 
 def f_upload_module(session, local_path, remote_path):
-    module_with_executable = tvm.runtime.module.load_module(local_path)
     session.upload(local_path, remote_path)
     rt_mod = session.load_module(remote_path)
-    rt_mod.relax_executable = module_with_executable.relax_executable
+    exec_path = os.path.join(str(Path(local_path).parent.absolute()), "exec.tmp")
+    rt_mod.relax_executable = relax.vm.load_exec_from_file(exec_path)
     return rt_mod
 
 
-def f_run_evaluator(rt_mod, device, evaluator_config, repeated_args):
+def f_run_evaluator(session, rt_mod, device, evaluator_config, repeated_args):
     executable = rt_mod.relax_executable
     mod = rt_mod
     vm = relax.vm.VirtualMachine(exec=executable, device=device, mod=mod)
@@ -185,6 +186,11 @@ def main():
     builder_result = builder.build([builder_input])[0]
     assert builder_result.error_msg is None, builder_result.error_msg
     assert builder_result.artifact_path is not None
+
+    exec_path = os.path.join(str(Path(builder_result.artifact_path).parent.absolute()), "exec.tmp")
+    with transform.PassContext(opt_level=0):
+        executable, _ = relax.vm.build(relax_mod, ARGS.target)
+    executable.save_to_file(exec_path)
 
     args_info = [ms.arg_info.TensorInfo("float32", input_shape)]
     for param in params.values():
