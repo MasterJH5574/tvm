@@ -106,6 +106,14 @@ def f_build(mod, target, params):
     return mod
 
 
+def f_upload_module(session, local_path, remote_path):
+    module_with_executable = tvm.runtime.module.load_module(local_path)
+    session.upload(local_path, remote_path)
+    rt_mod = session.load_module(remote_path)
+    rt_mod.relax_executable = module_with_executable.relax_executable
+    return rt_mod
+
+
 def f_run_evaluator(rt_mod, device, evaluator_config, repeated_args):
     executable = rt_mod.relax_executable
     mod = rt_mod
@@ -198,6 +206,7 @@ def main():
         evaluator_config=evaluator_config,
         alloc_repeat=3,
         max_workers=ARGS.rpc_workers,
+        f_upload_module=f_upload_module,
         f_run_evaluator=f_run_evaluator,
     )
 
