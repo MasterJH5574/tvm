@@ -59,6 +59,11 @@ class ExpandDimsAttrs(Attrs):
     """Attributes for expand_dims operator"""
 
 
+@tvm._ffi.register_object("relax.attrs.LayoutTransformAttrs")
+class LayoutTransformAttrs(Attrs):
+    """Attributes used in layout_transform operator"""
+
+
 @tvm._ffi.register_object("relax.attrs.PermuteDimsAttrs")
 class PermuteDimsAttrs(Attrs):
     """Attributes for permute_dims operator"""
@@ -74,9 +79,14 @@ class SqueezeAttrs(Attrs):
     """Attributes for squeeze operator"""
 
 
-@tvm._ffi.register_object("relax.attrs.LayoutTransformAttrs")
-class LayoutTransformAttrs(Attrs):
-    """Attributes used in layout_transform operator"""
+@tvm._ffi.register_object("relax.attrs.UniqueAttrs")
+class UniqueAttrs(Attrs):
+    """Attributes used for the unique operator"""
+
+
+@tvm._ffi.register_object("relax.attrs.StatisticalAttrs")
+class StatisticalAttrs(Attrs):
+    """Attributes used in statistical operator"""
 
 
 @tvm._ffi.register_object("relax.attrs.UniqueAttrs")
@@ -122,3 +132,8 @@ class LayerNormAttrs(Attrs):
 @tvm._ffi.register_object("relax.attrs.DropoutAttrs")
 class DropoutAttrs(Attrs):
     """Attributes for dropout operator"""
+
+
+@tvm._ffi.register_object("relax.attrs.Resize2DAttrs")
+class Resize2DAttrs(Attrs):
+    """Attributes used in image resize2d operator"""
