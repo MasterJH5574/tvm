@@ -82,3 +82,8 @@ class LayoutTransformAttrs(Attrs):
 @tvm._ffi.register_object("relax.attrs.UniqueAttrs")
 class UniqueAttrs(Attrs):
     """Attributes used for the unique operator"""
+
+
+@tvm._ffi.register_object("relax.attrs.StatisticalAttrs")
+class StatisticalAttrs(Attrs):
+    """Attributes used in statistical operator"""
