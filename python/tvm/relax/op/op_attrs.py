@@ -47,3 +47,33 @@ class StridedSliceAttrs(Attrs):
 @tvm._ffi.register_object("relax.attrs.MatmulAttrs")
 class MatmulAttrs(Attrs):
     """Attributes for matmul operator"""
+
+
+@tvm._ffi.register_object("relax.attrs.ConcatAttrs")
+class ConcatAttrs(Attrs):
+    """Attributes for concat operator"""
+
+
+@tvm._ffi.register_object("relax.attrs.ExpandDimsAttrs")
+class ExpandDimsAttrs(Attrs):
+    """Attributes for expand_dims operator"""
+
+
+@tvm._ffi.register_object("relax.attrs.PermuteDimsAttrs")
+class PermuteDimsAttrs(Attrs):
+    """Attributes for permute_dims operator"""
+
+
+@tvm._ffi.register_object("relax.attrs.SplitAttrs")
+class SplitAttrs(Attrs):
+    """Attributes used in split operator"""
+
+
+@tvm._ffi.register_object("relax.attrs.SqueezeAttrs")
+class SqueezeAttrs(Attrs):
+    """Attributes for squeeze operator"""
+
+
+@tvm._ffi.register_object("relax.attrs.LayoutTransformAttrs")
+class LayoutTransformAttrs(Attrs):
+    """Attributes used in layout_transform operator"""
