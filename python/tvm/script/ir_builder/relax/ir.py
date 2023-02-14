@@ -106,6 +106,7 @@ from tvm.relax.op import (
     triu,
     unique,
     variance,
+    where,
     zeros,
     zeros_like,
 )
@@ -558,6 +559,7 @@ __all__ = [
     "tuple",
     "unique",
     "variance",
+    "where",
     "zeros",
     "zeros_like",
 ]
