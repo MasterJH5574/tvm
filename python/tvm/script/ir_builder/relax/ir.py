@@ -98,6 +98,7 @@ from tvm.relax.op import (
     tanh,
     tril,
     triu,
+    unique,
     zeros,
     zeros_like,
 )
@@ -542,6 +543,7 @@ __all__ = [
     "tril",
     "triu",
     "tuple",
+    "unique",
     "zeros",
     "zeros_like",
 ]

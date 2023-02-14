@@ -77,3 +77,8 @@ class SqueezeAttrs(Attrs):
 @tvm._ffi.register_object("relax.attrs.LayoutTransformAttrs")
 class LayoutTransformAttrs(Attrs):
     """Attributes used in layout_transform operator"""
+
+
+@tvm._ffi.register_object("relax.attrs.UniqueAttrs")
+class UniqueAttrs(Attrs):
+    """Attributes used for the unique operator"""

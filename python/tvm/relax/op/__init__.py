@@ -26,6 +26,7 @@ from .index import *
 from .linear_algebra import *
 from .manipulate import *
 from .op_attrs import *
+from .set import *
 from .ternary import *
 from .unary import *
 from . import builtin
