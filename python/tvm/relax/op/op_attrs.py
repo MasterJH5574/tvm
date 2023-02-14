@@ -42,3 +42,8 @@ class TakeAttrs(Attrs):
 @tvm._ffi.register_object("relax.attrs.StridedSliceAttrs")
 class StridedSliceAttrs(Attrs):
     """Attributes used in strided_slice operator"""
+
+
+@tvm._ffi.register_object("relax.attrs.MatmulAttrs")
+class MatmulAttrs(Attrs):
+    """Attributes for matmul operator"""
