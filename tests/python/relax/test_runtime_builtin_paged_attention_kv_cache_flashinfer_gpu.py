@@ -27,7 +27,7 @@ from tvm.script import tir as T
 
 reserved_nseq = 2
 total_seq_len = 128
-page_size = 8
+page_size = 16
 nlayer = 4
 nhead = 16
 nfeat = 64
@@ -109,6 +109,39 @@ def build_tir_func(tir_funcs: List[tvm.tir.PrimFunc], target="llvm"):
     return builts
 
 
+def get_attention_kernel():
+    ext_mod = tvm.runtime.load_static_library(
+        "/home/ruihangl/flashinfer/build/CMakeFiles/tvm_binding.dir/src/tvm_wrapper.cu.o",
+        ["FlashInferAttentionWithPagedKVCache"],
+    )
+    assert ext_mod.implements_function("FlashInferAttentionWithPagedKVCache")
+    assert ext_mod.is_dso_exportable
+    temp_dir = utils.tempdir()
+    mod_dso_path = temp_dir.relpath("mod.so")
+    ext_mod.export_library(mod_dso_path)
+    ext_mod = tvm.runtime.load_module(mod_dso_path)
+    assert ext_mod.implements_function("FlashInferAttentionWithPagedKVCache")
+    return ext_mod.get_function("FlashInferAttentionWithPagedKVCache")
+
+
+def f_apply_rotary(x, offset, scale, theta):
+    # x: (N, H, F)
+    assert len(x.shape) == 3
+    nfeat = x.shape[-1]
+    nfeat_half = x.shape[-1] // 2
+    x = x.astype("float32")
+    y = np.concatenate([-x[:, :, nfeat_half:], x[:, :, :nfeat_half]], axis=-1)
+
+    inv_freq = scale / (theta ** (np.arange(0, nfeat, 2).astype("float32") / nfeat))
+    t = np.arange(offset, offset + x.shape[0], dtype=inv_freq.dtype)
+    freqs = np.einsum("i,j->ij", t, inv_freq)
+    emb = np.concatenate((freqs, freqs), axis=-1)
+    cos_values = np.cos(emb)
+    sin_values = np.sin(emb)
+
+    return np.einsum("ij,ikj->ikj", cos_values, x) + np.einsum("ij,ikj->ikj", sin_values, y)
+
+
 def test_paged_attention_kv_cache_attention_decode():
     fcreate = tvm.get_global_func("vm.builtin.paged_attention_kv_cache_create")
     fprepare = tvm.get_global_func("vm.builtin.paged_attention_kv_cache_prepare")
@@ -116,18 +149,7 @@ def test_paged_attention_kv_cache_attention_decode():
     fattention = tvm.get_global_func("vm.builtin.paged_attention_kv_cache_attention")
     (f_transpose_append,) = build_tir_func([transpose_append], target=target)
 
-    ext_mod = tvm.runtime.load_static_library(
-        "/home/ruihangl/flashinfer/build/CMakeFiles/tvm_binding.dir/src/tvm_wrapper.cu.o",
-        ["FlashInferBatchDecodeWithPagedKVCache"],
-    )
-    assert ext_mod.implements_function("FlashInferBatchDecodeWithPagedKVCache")
-    assert ext_mod.is_dso_exportable
-    temp_dir = utils.tempdir()
-    mod_dso_path = temp_dir.relpath("mod.so")
-    ext_mod.export_library(mod_dso_path)
-    ext_mod = tvm.runtime.load_module(mod_dso_path)
-    assert ext_mod.implements_function("FlashInferBatchDecodeWithPagedKVCache")
-    attention_kernel = ext_mod.get_function("FlashInferBatchDecodeWithPagedKVCache")
+    attention_kernel = get_attention_kernel()
 
     device = tvm.cuda()
     cache = fcreate(
@@ -205,18 +227,7 @@ def test_paged_attention_kv_cache_attention_decode_with_rope():
     fattention = tvm.get_global_func("vm.builtin.paged_attention_kv_cache_attention")
     (f_transpose_append,) = build_tir_func([transpose_append], target=target)
 
-    ext_mod = tvm.runtime.load_static_library(
-        "/home/ruihangl/flashinfer/build/CMakeFiles/tvm_binding.dir/src/tvm_wrapper.cu.o",
-        ["FlashInferBatchDecodeWithPagedKVCache"],
-    )
-    assert ext_mod.implements_function("FlashInferBatchDecodeWithPagedKVCache")
-    assert ext_mod.is_dso_exportable
-    temp_dir = utils.tempdir()
-    mod_dso_path = temp_dir.relpath("mod.so")
-    ext_mod.export_library(mod_dso_path)
-    ext_mod = tvm.runtime.load_module(mod_dso_path)
-    assert ext_mod.implements_function("FlashInferBatchDecodeWithPagedKVCache")
-    attention_kernel = ext_mod.get_function("FlashInferBatchDecodeWithPagedKVCache")
+    attention_kernel = get_attention_kernel()
 
     device = tvm.cuda()
     cache = fcreate(
@@ -261,24 +272,6 @@ def test_paged_attention_kv_cache_attention_decode_with_rope():
         values = tvm.nd.array(decode_new_kv[layer_id, 1], device)
         fappend(cache, f_transpose_append, keys, values, layer_id)
 
-    def f_apply_rotary(x, offset, scale, theta):
-        # x: (N, H, F)
-        assert len(x.shape) == 3
-        nfeat = x.shape[-1]
-        nfeat_half = x.shape[-1] // 2
-        x = x.astype("float32")
-        y = np.concatenate([-x[:, :, nfeat_half:], x[:, :, :nfeat_half]], axis=-1)
-
-        inv_freq = scale / (theta ** (np.arange(0, nfeat, 2).astype("float32") / nfeat))
-        t = np.arange(offset, offset + x.shape[0], dtype=inv_freq.dtype)
-        freqs = np.einsum("i,j->ij", t, inv_freq)
-        emb = np.concatenate((freqs, freqs), axis=-1)
-        cos_values = np.cos(emb)
-        sin_values = np.sin(emb)
-
-        return np.einsum("ij,ikj->ikj", cos_values, x) + np.einsum("ij,ikj->ikj", sin_values, y)
-        # return x
-
     # Attention
     q = np.random.uniform(-1, 1, size=(nlayer, nseq, 1, nhead, nfeat)).astype(dtype)
     for layer_id in range(nlayer):
@@ -322,6 +315,106 @@ def test_paged_attention_kv_cache_attention_decode_with_rope():
         tvm.testing.assert_allclose(output, results, rtol=1e-3, atol=1e-3)
 
 
+def test_paged_attention_kv_cache_attention_prefill_with_rope():
+    fcreate = tvm.get_global_func("vm.builtin.paged_attention_kv_cache_create")
+    fprepare = tvm.get_global_func("vm.builtin.paged_attention_kv_cache_prepare")
+    fappend = tvm.get_global_func("vm.builtin.paged_attention_kv_cache_append")
+    fattention = tvm.get_global_func("vm.builtin.paged_attention_kv_cache_attention")
+    (f_transpose_append,) = build_tir_func([transpose_append], target=target)
+    attention_kernel = get_attention_kernel()
+
+    device = tvm.cuda()
+    cache = fcreate(
+        tvm.runtime.ShapeTuple([reserved_nseq, total_seq_len, page_size]),
+        nlayer,
+        nhead,
+        nfeat,
+        tvm.nd.empty((), dtype, device=device),
+    )
+
+    apply_rotary = True
+    rotary_scale = 1.0
+    rotary_theta = 1e4
+
+    operation_seq = [(0, 6), (1, 8), (2, 11), (3, 19)]
+    operation_seq += [(0, 43), (1, 21), (2, 24), (3, 35)]
+
+    current_nseq = 0
+    append_lengths_list = []
+    cached_values = []
+
+    # Prefill and attention
+    for seq_id, append_length in operation_seq:
+        if seq_id >= current_nseq:
+            assert seq_id == current_nseq
+            current_nseq += 1
+            cached_values.append(np.zeros((nlayer, 2, 0, nhead, nfeat), dtype))
+
+        append_lengths_list = [0] * current_nseq
+        append_lengths_list[seq_id] = append_length
+
+        append_lengths = tvm.runtime.ShapeTuple(append_lengths_list)
+        fprepare(cache, append_lengths)
+
+        new_kv = np.random.rand(nlayer, 2, append_length, nhead, nfeat).astype(dtype)
+        new_kv[:, 0, ...] = 0.0
+        new_kv[:, 1, ...] = 0.0
+        # new_kv[:, 1, ...] = 1.0 * append_length
+        cached_values[seq_id] = np.concatenate([cached_values[seq_id], new_kv], axis=2)
+        for layer_id in range(nlayer):
+            keys = tvm.nd.array(np.expand_dims(new_kv[layer_id, 0], axis=0), device)
+            values = tvm.nd.array(np.expand_dims(new_kv[layer_id, 1], axis=0), device)
+            fappend(cache, f_transpose_append, keys, values, layer_id)
+
+        # q = np.random.uniform(-1, 1, size=(nlayer, 1, append_length, nhead, nfeat)).astype(dtype)
+        q = np.zeros((nlayer, 1, append_length, nhead, nfeat)).astype(dtype)
+        for layer_id in range(nlayer):
+            print(f"layer = {layer_id}")
+            q_on_layer = q[layer_id]
+            output = tvm.nd.empty((1, append_length, nhead, nfeat), dtype, device=device)
+            print(f"q shape = {q_on_layer.shape}, output shape = {output.shape}")
+            fattention(
+                cache,
+                attention_kernel,
+                tvm.nd.array(q_on_layer, device),
+                layer_id,
+                apply_rotary,
+                rotary_scale,
+                rotary_theta,
+                output,
+            )
+
+            print(output.numpy())
+            exit(0)
+            # assert cached_values[seq_id].shape[2] >= append_length
+            # rope_offset = cached_values[seq_id].shape[2] - append_length
+            # q_seq = f_apply_rotary(
+            #     q_on_layer[0],
+            #     rope_offset,
+            #     rotary_scale,
+            #     rotary_theta,
+            # ).transpose(1, 0, 2)
+            # k_seq = f_apply_rotary(
+            #     cached_values[seq_id][layer_id, 0], 0, rotary_scale, rotary_theta
+            # ).transpose(1, 2, 0)
+            # v_seq = cached_values[seq_id][layer_id, 1].transpose(1, 0, 2)
+
+            # results = np.expand_dims(
+            #     (
+            #         scipy.special.softmax(
+            #             (q_seq.astype("float32") @ k_seq.astype("float32")) / np.sqrt(nfeat),
+            #             axis=-1,
+            #         )
+            #         @ v_seq.astype("float32")
+            #     ).transpose(1, 0, 2),
+            #     axis=0,
+            # ).astype(dtype)
+
+            # output = output.numpy()
+            # tvm.testing.assert_allclose(output, results, rtol=1e-3, atol=1e-3)
+
+
 if __name__ == "__main__":
-    test_paged_attention_kv_cache_attention_decode()
-    test_paged_attention_kv_cache_attention_decode_with_rope()
+    # test_paged_attention_kv_cache_attention_decode()
+    # test_paged_attention_kv_cache_attention_decode_with_rope()
+    test_paged_attention_kv_cache_attention_prefill_with_rope()
