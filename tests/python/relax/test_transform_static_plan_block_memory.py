@@ -979,7 +979,8 @@ def test_tir_var_upper_bound():
             alloc3: R.Tensor((2 * n + 2,), dtype="float32") = R.memory.alloc_tensor(storage1, R.prim_value(0), R.shape([2 * n + 2]), R.dtype("float32"))
             _3: R.Tuple = cls.pad(lv3, alloc3)
             lv4: R.Tensor((2 * n + 2,), dtype="float32") = alloc3
-            alloc4: R.Tensor((2 * n + 2,), dtype="float32") = R.builtin.alloc_tensor(R.shape([10]), R.dtype("float32"), R.prim_value(0))
+            storage2: R.Object = R.memory.alloc_storage(R.shape([40]), R.prim_value(0), R.str("global"), R.dtype("float32"))
+            alloc4: R.Tensor((2 * n + 2,), dtype="float32") = R.memory.alloc_tensor(storage2, R.prim_value(0), R.shape([2 * n + 2]), R.dtype("float32"))
             _4: R.Tuple = cls.log(lv4, alloc4)
             gv: R.Tensor((2 * n + 2,), dtype="float32") = alloc4
             return gv
@@ -1034,7 +1035,8 @@ def test_tir_var_decreasing_monotone():
             alloc1: R.Tensor((n, m, T.max(n - m, 1)), dtype="float32") = R.memory.alloc_tensor(storage1, R.prim_value(0), R.shape([n, m, T.max(n - m, 1)]), R.dtype("float32"))
             _1: R.Tuple = cls.tir_exp(y, alloc1)
             z: R.Tensor((n, m, T.max(n - m, 1)), dtype="float32") = alloc1
-            alloc2: R.Tensor((n, m, T.max(n - m, 1)), dtype="float32") = R.builtin.alloc_tensor(R.shape([n, m, T.max(n - m, 1)]), R.dtype("float32"), R.prim_value(0))
+            storage2: R.Object = R.memory.alloc_storage(R.shape([8000]), R.prim_value(0), R.str("global"), R.dtype("float32"))
+            alloc2: R.Tensor((n, m, T.max(n - m, 1)), dtype="float32") = R.memory.alloc_tensor(storage2, R.prim_value(0), R.shape([n, m, T.max(n - m, 1)]), R.dtype("float32"))
             _2: R.Tuple = cls.tir_exp(z, alloc2)
             r: R.Tensor((n, m, T.max(n - m, 1)), dtype="float32") = alloc2
             return r
@@ -1095,7 +1097,8 @@ def test_call_tir_dyn():
             alloc1: R.Tensor((n,), dtype="float32") = R.memory.alloc_tensor(storage1, R.prim_value(0), R.shape([n]), R.dtype("float32"))
             _1: R.Tuple = cls.tir_exp(full, alloc1)
             lv2: R.Tensor((n,), dtype="float32") = alloc1
-            alloc2: R.Tensor((n,), dtype="float32") = R.builtin.alloc_tensor(R.shape([n]), R.dtype("float32"), R.prim_value(0))
+            storage2: R.Object = R.memory.alloc_storage(R.shape([80]), R.prim_value(0), R.str("global"), R.dtype("float32"))
+            alloc2: R.Tensor((n,), dtype="float32") = R.memory.alloc_tensor(storage2, R.prim_value(0), R.shape([n]), R.dtype("float32"))
             _2: R.Tuple = cls.tir_exp(lv2, alloc2)
             lv3: R.Tensor((n,), dtype="float32") = alloc2
             return lv3
