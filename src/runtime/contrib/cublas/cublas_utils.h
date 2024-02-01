@@ -126,6 +126,9 @@ void CallCublasLt(cublasLtHandle_t hdl, cudaStream_t stream,
                   void* workspace_ptr, size_t workspace_size,
                   cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_DEFAULT);
 
+void CallCublasGemmEx(cublasHandle_t hdl, const DLTensor* A, const DLTensor* B, const DLTensor* C,
+                      bool transa, bool transb);
+
 }  // namespace contrib
 }  // namespace tvm
 

@@ -360,6 +360,113 @@ inline void CallLtIgemm(TVMArgs args, TVMRetValue* ret, cublasLtHandle_t hdl, cu
 }
 #endif
 
+void CallCublasGemmEx(cublasHandle_t hdl, const DLTensor* A, const DLTensor* B, const DLTensor* C,
+                      bool transa, bool transb) {
+  ICHECK(TypeEqual(A->dtype, B->dtype));
+  // Reversed strides indicates an in-place transpose operation.
+  transa = IsInPlaceTransposed(A) ? !transa : transa;
+  transb = IsInPlaceTransposed(B) ? !transb : transb;
+
+  auto compute_type = CUBLAS_COMPUTE_32F;
+  cudaDataType_t ab_type = CUDA_R_32F;
+  cudaDataType_t c_type = CUDA_R_32F;
+  float one_fp32 = 1.0;
+  float zero_fp32 = 0.0;
+  auto one_fp16 = __truncXfYf2__<float, uint32_t, 23, uint16_t, uint16_t, 10>(1.0);
+  auto zero_fp16 = __truncXfYf2__<float, uint32_t, 23, uint16_t, uint16_t, 10>(0.0);
+  int32_t one_i32 = 1;
+  int32_t zero_i32 = 0;
+  void* alpha = &one_fp32;
+  void* beta = &zero_fp32;
+
+  if (TypeMatch(A->dtype, kDLFloat, 16)) {
+    ab_type = CUDA_R_16F;
+  } else if (TypeMatch(A->dtype, kDLInt, 8)) {
+    ab_type = CUDA_R_8I;
+  }
+
+  if (TypeMatch(C->dtype, kDLFloat, 16)) {
+    c_type = CUDA_R_16F;
+    compute_type = CUBLAS_COMPUTE_16F;
+    alpha = &one_fp16;
+    beta = &zero_fp16;
+  } else if (TypeMatch(C->dtype, kDLInt, 32)) {
+    c_type = CUDA_R_32I;
+    compute_type = CUBLAS_COMPUTE_32I;
+    alpha = &one_i32;
+    beta = &zero_i32;
+  }
+
+  int batch_offset_A = A->ndim - 2;
+  int batch_offset_B = B->ndim - 2;
+
+  int M = ColumnCount(B, transb, batch_offset_B);
+  int N = RowCount(A, transa, batch_offset_A);
+  int K = ColumnCount(A, transa, batch_offset_A);
+  bool use_batched_gemm = A->ndim > 2 || B->ndim > 2;
+
+  // If A is batched but B is not, flatten all non-reduction axes of A to use the regular GEMM.
+  // This trick is only applicable if batch axes and the other spatial axis (M or N) are
+  // adjacent in both the input and the output matrix. In particular, if A is of shape (M, K)
+  // and B matrix is of shape (Batch, N, K) with transb = true, the output shape
+  // is (Batch, M, N). Since the Batch and the N axes are not adjacent in the output, we cannot
+  // use the regular GEMM if only B is batched.
+  if (A->ndim > 2 && B->ndim == 2 && transa == false) {
+    N = 1;
+    for (int i = 0; i < A->ndim - 1; ++i) {
+      N *= A->shape[i];
+    }
+    use_batched_gemm = false;
+  }
+
+  int lda = transb ? K : M;
+  int ldb = transa ? N : K;
+  int ldc = M;
+  cublasOperation_t transa_op = transb ? CUBLAS_OP_T : CUBLAS_OP_N;
+  cublasOperation_t transb_op = transa ? CUBLAS_OP_T : CUBLAS_OP_N;
+
+  if (use_batched_gemm) {
+    LOG(FATAL) << "no support for batched gemm right now";
+    // auto get_batch_count = [](int64_t* shape, int batch_offset) {
+    //   int64_t count = 1;
+    //   for (int i = 0; i < batch_offset; ++i) {
+    //     count *= shape[i];
+    //   }
+    //   return count;
+    // };
+    // auto set_batch = [](cublasLtMatrixLayout_t mat_desc, int batch_count, int64_t batch_stride) {
+    //   CHECK_CUBLAS_ERROR(cublasLtMatrixLayoutSetAttribute(
+    //       mat_desc, CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batch_count, sizeof(batch_count)));
+    //   CHECK_CUBLAS_ERROR(
+    //       cublasLtMatrixLayoutSetAttribute(mat_desc, CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET,
+    //                                        &batch_stride, sizeof(batch_stride)));
+    // };
+
+    // int batch_count_A = get_batch_count(A->shape, batch_offset_A);
+    // int batch_count_B = get_batch_count(B->shape, batch_offset_B);
+    // int batch_count_C = get_batch_count(C->shape, C->ndim - 2);
+    // int64_t batch_stride_A = M * K;
+    // int64_t batch_stride_B = K * N;
+    // int64_t batch_stride_C = M * N;
+
+    // // cuBLASLt does not seem to support batched GEMM with one of matrices having
+    // // one batch (with batch_stride 0).
+    // ICHECK_EQ(batch_count_A, batch_count_B);
+
+    // set_batch(A_desc, batch_count_A, batch_stride_A);
+    // set_batch(B_desc, batch_count_B, batch_stride_B);
+    // set_batch(C_desc, batch_count_C, batch_stride_C);
+  }
+
+  auto A_data = static_cast<char*>(A->data) + A->byte_offset;
+  auto B_data = static_cast<char*>(B->data) + B->byte_offset;
+  auto C_data = static_cast<char*>(C->data) + C->byte_offset;
+
+  CHECK_CUBLAS_ERROR(cublasGemmEx(hdl, transa_op, transb_op, M, N, K, alpha, B_data, ab_type, lda,
+                                  A_data, ab_type, ldb, beta, C_data, c_type, ldc, compute_type,
+                                  CUBLAS_GEMM_DEFAULT));
+}
+
 inline void CallGemmEx(TVMArgs args, TVMRetValue* ret, cublasHandle_t hdl) {
   DLTensor* A = args[0];
   DLTensor* B = args[1];
