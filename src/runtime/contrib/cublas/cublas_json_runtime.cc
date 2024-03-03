@@ -129,15 +129,9 @@ class CublasJSONRuntime : public JSONRuntimeBase {
 
         auto [a_ptr, b_ptr, bias_ptr] = get_inputs(node, epilogue != CUBLASLT_EPILOGUE_DEFAULT);
 
-        if (epilogue != CUBLASLT_EPILOGUE_DEFAULT) {
-          tvm::contrib::CallCublasLt(entry_ptr->handle, stream, entry_ptr->matmul_pref_desc, a_ptr,
-                                     b_ptr, bias_ptr, out_ptr, transa, transb,
-                                     entry_ptr->workspace_ptr, entry_ptr->workspace_size, epilogue);
-        } else {
-          auto* cublas_entry_ptr = tvm::contrib::CuBlasThreadEntry::ThreadLocal();
-          tvm::contrib::CallCublasGemmEx(cublas_entry_ptr->handle, a_ptr, b_ptr, out_ptr, transa,
-                                         transb);
-        }
+        tvm::contrib::CallCublasLt(entry_ptr->handle, stream, entry_ptr->matmul_pref_desc, a_ptr,
+                                   b_ptr, bias_ptr, out_ptr, transa, transb,
+                                   entry_ptr->workspace_ptr, entry_ptr->workspace_size, epilogue);
       }
     }
   }
