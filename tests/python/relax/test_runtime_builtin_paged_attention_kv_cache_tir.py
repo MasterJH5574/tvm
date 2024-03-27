@@ -226,7 +226,7 @@ def f_apply_rotary(x, offset, scale, theta):
 def apply_attention(
     kv_cache,
     rope_mode: RopeMode,
-    batch: List[Tuple[Union[int, Tuple[int, int]], int]],
+    batch: List[Tuple[Union[int, Tuple[int, int, int]], int]],
     cached_k: Dict[int, np.ndarray],
     cached_v: Dict[int, np.ndarray],
     sliding_window_sizes: Optional[List[int]] = None,
@@ -238,7 +238,7 @@ def apply_attention(
         fork_parent_id = None
         if isinstance(seq_id, tuple):
             # Fork sequence
-            seq_id, fork_parent_id = seq_id
+            seq_id, fork_parent_id, fork_position = seq_id
             batch[i] = (seq_id, append_length)
         seq_ids.append(seq_id)
         append_lengths.append(append_length)
@@ -246,8 +246,8 @@ def apply_attention(
             assert fork_parent_id in cached_k
             assert seq_id not in cached_k
             ffork_sequence(kv_cache, fork_parent_id, seq_id)
-            cached_k[seq_id] = cached_k[fork_parent_id]
-            cached_v[seq_id] = cached_v[fork_parent_id]
+            cached_k[seq_id] = cached_k[fork_parent_id][0:fork_position] # Todo: layout
+            cached_v[seq_id] = cached_v[fork_parent_id][0:fork_position]
         elif seq_id not in cached_k:
             fadd_sequence(kv_cache, seq_id)
             cached_k[seq_id] = np.zeros((num_layers, 0, num_kv_heads, head_dim), dtype)
@@ -442,12 +442,13 @@ def test_paged_attention_kv_cache_fork_sequence(kv_cache_and_config):
     batch = [(0, 60), (1, 88), (2, 17), (3, 4)]
     apply_attention(kv_cache, rope_mode, batch, cached_k, cached_v)
     # Fork existing sequences.
-    apply_attention(kv_cache, rope_mode, [((4, 3), 35)], cached_k, cached_v)
-    apply_attention(kv_cache, rope_mode, [((5, 0), 20)], cached_k, cached_v)
-    apply_attention(kv_cache, rope_mode, [((6, 5), 102)], cached_k, cached_v)
-    apply_attention(kv_cache, rope_mode, [((7, 0), 3)], cached_k, cached_v)
-    apply_attention(kv_cache, rope_mode, [((8, 5), 71)], cached_k, cached_v)
-    apply_attention(kv_cache, rope_mode, [((9, 5), 20)], cached_k, cached_v)
+    fork_pos = -1
+    apply_attention(kv_cache, rope_mode, [((4, 3, fork_pos), 35)], cached_k, cached_v)
+    apply_attention(kv_cache, rope_mode, [((5, 0, fork_pos), 20)], cached_k, cached_v)
+    apply_attention(kv_cache, rope_mode, [((6, 5, fork_pos), 102)], cached_k, cached_v)
+    apply_attention(kv_cache, rope_mode, [((7, 0, fork_pos), 3)], cached_k, cached_v)
+    apply_attention(kv_cache, rope_mode, [((8, 5, fork_pos), 71)], cached_k, cached_v)
+    apply_attention(kv_cache, rope_mode, [((9, 5, fork_pos), 20)], cached_k, cached_v)
     # Mixture of decode and prefill.
     operation_seq = [
         [(2, 1), (4, 1), (7, 1), (6, 1), (8, 1), (9, 1)],
@@ -457,6 +458,8 @@ def test_paged_attention_kv_cache_fork_sequence(kv_cache_and_config):
     ]
     for batch in operation_seq:
         apply_attention(kv_cache, rope_mode, batch, cached_k, cached_v)
+
+    # tests where fork positions are not -1
 
     for i in range(9, -1, -1):
         fremove_sequence(kv_cache, i)

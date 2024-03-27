@@ -557,6 +557,12 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         << "The parent sequence \"" << parent_seq_id
         << "\" is enabled with sliding window and thus cannot be forked.";
 
+    // int64_t fork_pos
+    // => block b, page i, pos p
+    // page [0, i) ==> lift into a new block  ==> "new parent block idx"
+    // removing [0, i) from the original block, set the parent block idx
+    // create a new block with new page, with the data copied from page i [0, p)
+
     int32_t parent_block_idx = parent_it->second.last_block_idx;
     ++global_block_pool_[parent_block_idx].external_ref_cnt;
     // Create a child block with the parent block pointer.
@@ -566,6 +572,24 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     // Create the child sequence with the child block.
     seq_map_.insert({child_seq_id, Sequence(global_block_pool_, child_block_idx)});
     dirty_aux_data_device_ = true;
+
+    /*
+    @T.prim_func
+    def copy(pages: T.Buffer(), src_page_id: T.int64, tgt_page_id: T.int64, copy_length: T.int64):
+        for h, pos, d in T.grid(num_kv_heads, copy_length, head_dim):
+          pages[tgt_page_id, 0, h, pos, d] = pages[src_page_id, 0, h, pos, d]
+          pages[tgt_page_id, 1, h, pos, d] = pages[src_page_id, 1, h, pos, d]
+    */
+
+    // PackedFunc f_copy_single_page_;
+
+    /*
+    void CopySinglePage(src_page_id, tgt_page_id, copy_length) {
+      for (int layer = 0; layer < num_layers; ++layer) {
+        f_copy_single_page(pages[layer], src_page_id, tgt_page_id, copy_length);
+      }
+    }
+    */
   }
 
   void EnableSlidingWindowForSeq(int64_t seq_id, int32_t sliding_window_size,
@@ -1412,7 +1436,8 @@ TVM_REGISTER_GLOBAL("vm.builtin.paged_attention_kv_cache_create")
                        PackedFunc f_attention_prefill_end_forward,
                        PackedFunc f_attention_decode_begin_forward,
                        PackedFunc f_attention_decode_end_forward, PackedFunc f_merge_inplace,
-                       PackedFunc f_split_rotary, Optional<PackedFunc> f_debug_get_kv) {
+                       PackedFunc f_split_rotary, PackedFunc f_copy_single_page,
+                       Optional<PackedFunc> f_debug_get_kv) {
       CHECK_EQ(cache_config.size(), 5);
       int64_t reserved_num_seqs = cache_config[0];
       int64_t total_token_capacity = cache_config[1];
