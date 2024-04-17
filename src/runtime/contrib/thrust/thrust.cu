@@ -38,7 +38,7 @@
 #include <memory>
 #include <vector>
 
-#include "../../cuda/cuda_common.h"
+#include "../../rocm/rocm_common.h"
 namespace tvm {
 namespace contrib {
 
@@ -89,7 +89,7 @@ class WorkspaceMemoryResource : public thrust::mr::memory_resource<void*> {
 };
 
 auto get_thrust_exec_policy(WorkspaceMemoryResource* memory_resouce) {
-  return thrust::cuda::par_nosync(memory_resouce).on(GetCUDAStream());
+  return thrust::hip::par_nosync(memory_resouce).on(GetHipStream());
 }
 
 // Performs sorting along axis -1 and returns both sorted values and indices.

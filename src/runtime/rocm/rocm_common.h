@@ -61,6 +61,8 @@ class ROCMThreadEntry {
   // get the threadlocal workspace
   static ROCMThreadEntry* ThreadLocal();
 };
+
+inline hipStream_t GetHipStream() { return ROCMThreadEntry::ThreadLocal()->stream; }
 }  // namespace runtime
 }  // namespace tvm
 #endif  // TVM_RUNTIME_ROCM_ROCM_COMMON_H_
