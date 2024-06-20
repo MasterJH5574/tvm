@@ -92,9 +92,12 @@ class KVStateObj : public Object {
    * \param token_tree_parent_ptr The parent idx array of the token trees. Its length
    * is the sum of "append_lengths". Nullptr means the token tree of each sequence
    * is a chain.
+   * \param append_kv A boolean indicating whether to append the KV data in attention
+   * computation into KV cache.
    */
   virtual void BeginForward(const IntTuple& seq_ids, const IntTuple& append_lengths,
-                            const Optional<IntTuple>& token_tree_parent_ptr = NullOpt) = 0;
+                            const Optional<IntTuple>& token_tree_parent_ptr = NullOpt,
+                            bool append_kv = true) = 0;
 
   /*!
    * \brief Mark the start of the forward function.
@@ -172,6 +175,19 @@ class AttentionKVCacheObj : public KVStateObj {
   virtual void AttentionWithFusedQKV(int64_t layer_id, NDArray qkv_data, Optional<NDArray> mask,
                                      NDArray o_data, double attn_score_scaling_factor) = 0;
 
+  virtual void AttentionNoAppend(int64_t layer_id, NDArray q_data, NDArray k_data, NDArray v_data,
+                                 NDArray o_data, double attn_score_scaling_factor) = 0;
+
+  virtual void CrossAttention(int64_t layer_id, NDArray q_data, NDArray o_data,
+                              double attn_score_scaling_factor) = 0;
+
+  virtual void PushCrossAttentionKV(int64_t layer_id, NDArray k_data, NDArray v_data) = 0;
+
+  virtual void BeginPushCrossAttnKVForward(const IntTuple& seq_ids,
+                                           const IntTuple& append_lengths) = 0;
+
+  virtual void EndPushCrossAttnKVForward() = 0;
+
   /************** Positions **************/
 
   /*!
@@ -202,6 +218,8 @@ class AttentionKVCacheObj : public KVStateObj {
    */
   virtual void DebugGetKV(int64_t seq_id,  //
                           int64_t start_pos, int64_t end_pos, NDArray k_data, NDArray v_data) = 0;
+
+  virtual void DebugGetCrossAttnKV(int64_t seq_id, NDArray k_data, NDArray v_data) = 0;
 
   /*!
    * \brief Set the K/V data of the given sequence from input K/V data.

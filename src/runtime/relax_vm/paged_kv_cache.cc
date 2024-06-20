@@ -54,6 +54,7 @@ namespace relax_vm {
  * prefixes) in paged KV cache.
  */
 constexpr const int kPagedKVCacheMaxBlockDepth = 5;
+constexpr const int kCrossAttnHandlerId = kPagedKVCacheMaxBlockDepth;
 /*! \brief The maximum tree size of a single sequence in tree attention. */
 constexpr const int kTreeAttnMaxTreeSize = 256;
 /*! \brief The 8MB workspace size for attention auxiliary data. */
@@ -150,6 +151,9 @@ struct Sequence {
    * in the KV cache even when sliding window is enabled.
    */
   int last_block_attn_sink_size = 0;
+
+  int32_t cross_attn_block_idx = -1;
+  int32_t cross_attn_seq_length = 0;
 
   /*! \brief Whether the current appended tokens form a chain (not a tree). */
   bool is_chain = true;
@@ -327,6 +331,10 @@ class PagedKVCacheAuxDataManager {
    * appending new K/V data.
    */
   virtual NDArray CopyAppendPositionMapAsync(HostMemoryVector* data) = 0;
+  virtual NDArray CopyCrossAttnPageIndptrAsync(HostMemoryVector* data) = 0;
+  virtual NDArray CopyCrossAttnPageIndicesAsync(HostMemoryVector* data) = 0;
+  virtual NDArray CopyCrossAttnLastPageLenAsync(HostMemoryVector* data) = 0;
+  virtual NDArray CopyCrossAttnKRoPEPosOffsetAsync(HostMemoryVector* data) = 0;
   /*! \brief Copy the tree attention mask. */
   virtual NDArray CopyTreeAttnMaskAsync(HostMemoryVector* data) = 0;
   /*! \brief Copy the mn indptr of the tree attention mask. */
@@ -382,6 +390,10 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
     k_ragged_rope_pos_offset_device_ = NDArray::Empty({reserved_num_seqs}, dtype_aux_, device);
     q_rope_position_map_device_ = NDArray::Empty({prefill_chunk_size}, dtype_aux_, device);
     append_position_map_device_ = NDArray::Empty({prefill_chunk_size}, dtype_aux_, device);
+    cross_attn_page_indptr_device_ = NDArray::Empty({reserved_num_seqs + 1}, dtype_aux_, device);
+    cross_attn_page_indices_device_ = NDArray::Empty({num_total_pages}, dtype_aux_, device);
+    cross_attn_last_page_len_device_ = NDArray::Empty({reserved_num_seqs}, dtype_aux_, device);
+    cross_attn_k_rope_pos_offset_device_ = NDArray::Empty({reserved_num_seqs}, dtype_aux_, device);
     tree_attn_mask_device_ = NDArray::Empty(
         {kTreeAttnMaxTreeSize * kTreeAttnMaxTreeSize * reserved_num_seqs}, dtype_aux_, device);
     tree_attn_mn_indptr_device_ = NDArray::Empty({reserved_num_seqs + 1}, dtype_aux_, device);
@@ -445,6 +457,30 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
   NDArray CopyAppendPositionMapAsync(HostMemoryVector* data) final {
     NDArray view =
         append_position_map_device_.CreateView({static_cast<int64_t>(data->size())}, dtype_aux_);
+    CopyVecDataToArray(view, data->data());
+    return view;
+  }
+  NDArray CopyCrossAttnPageIndptrAsync(HostMemoryVector* data) final {
+    NDArray view =
+        cross_attn_page_indptr_device_.CreateView({static_cast<int64_t>(data->size())}, dtype_aux_);
+    CopyVecDataToArray(view, data->data());
+    return view;
+  }
+  NDArray CopyCrossAttnPageIndicesAsync(HostMemoryVector* data) final {
+    NDArray view = cross_attn_page_indices_device_.CreateView({static_cast<int64_t>(data->size())},
+                                                              dtype_aux_);
+    CopyVecDataToArray(view, data->data());
+    return view;
+  }
+  NDArray CopyCrossAttnLastPageLenAsync(HostMemoryVector* data) final {
+    NDArray view = cross_attn_last_page_len_device_.CreateView({static_cast<int64_t>(data->size())},
+                                                               dtype_aux_);
+    CopyVecDataToArray(view, data->data());
+    return view;
+  }
+  NDArray CopyCrossAttnKRoPEPosOffsetAsync(HostMemoryVector* data) final {
+    NDArray view = cross_attn_k_rope_pos_offset_device_.CreateView(
+        {static_cast<int64_t>(data->size())}, dtype_aux_);
     CopyVecDataToArray(view, data->data());
     return view;
   }
@@ -559,6 +595,10 @@ class PlainPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
   NDArray k_ragged_rope_pos_offset_device_;
   NDArray q_rope_position_map_device_;
   NDArray append_position_map_device_;
+  NDArray cross_attn_page_indptr_device_;
+  NDArray cross_attn_page_indices_device_;
+  NDArray cross_attn_last_page_len_device_;
+  NDArray cross_attn_k_rope_pos_offset_device_;
   NDArray tree_attn_mask_device_;
   NDArray tree_attn_mn_indptr_device_;
   NDArray commit_copy_length_indptr_device_;
@@ -626,6 +666,18 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
   }
   NDArray CopyQRoPEPosMapAsync(HostMemoryVector* data) final { return CopyAttnAuxVecToCache(data); }
   NDArray CopyAppendPositionMapAsync(HostMemoryVector* data) final {
+    return CopyAttnAuxVecToCache(data);
+  }
+  NDArray CopyCrossAttnPageIndptrAsync(HostMemoryVector* data) final {
+    return CopyAttnAuxVecToCache(data);
+  }
+  NDArray CopyCrossAttnPageIndicesAsync(HostMemoryVector* data) final {
+    return CopyAttnAuxVecToCache(data);
+  }
+  NDArray CopyCrossAttnLastPageLenAsync(HostMemoryVector* data) final {
+    return CopyAttnAuxVecToCache(data);
+  }
+  NDArray CopyCrossAttnKRoPEPosOffsetAsync(HostMemoryVector* data) final {
     return CopyAttnAuxVecToCache(data);
   }
   NDArray CopyTreeAttnMaskAsync(HostMemoryVector* data) final {
@@ -730,12 +782,20 @@ class CachedPagedKVCacheAuxDataManager : public PagedKVCacheAuxDataManager {
     //  - k_ragged_rope_pos_offset
     //  - q_rope_position_map
     //  - append_position_map
+    //  - cross_attn_page_indptr
+    //  - cross_attn_page_indices
+    //  - cross_attn_last_page_len
+    //  - cross_attn_k_rope_pos_offset
     //  - tree_attn_mask
     //  - tree_attn_mn_indptr
     cache_size += CeilDivElemAlignment(reserved_num_seqs + 1);
     cache_size += CeilDivElemAlignment(reserved_num_seqs);
     cache_size += CeilDivElemAlignment(prefill_chunk_size);
     cache_size += CeilDivElemAlignment(prefill_chunk_size);
+    cache_size += CeilDivElemAlignment(reserved_num_seqs + 1);
+    cache_size += CeilDivElemAlignment(num_total_pages);
+    cache_size += CeilDivElemAlignment(reserved_num_seqs);
+    cache_size += CeilDivElemAlignment(reserved_num_seqs);
     cache_size +=
         CeilDivElemAlignment(kTreeAttnMaxTreeSize * kTreeAttnMaxTreeSize * reserved_num_seqs);
     cache_size += CeilDivElemAlignment(reserved_num_seqs + 1);
@@ -887,6 +947,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   IntTuple cur_seq_ids_;
   /*! \brief The append lengths of the sequences in the current round of forwarding. */
   IntTuple cur_append_lengths_;
+  bool append_kv_;
   /*! \brief Whether the current batch of sequences are token chains (not token trees). */
   bool is_chain_;
   /*! \brief Number of fork depth in the current round of forward. */
@@ -929,6 +990,10 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   HostMemoryVector commit_copy_length_indptr_host_;
   HostMemoryVector commit_copy_src_pos_in_page_table_host_;
   HostMemoryVector commit_copy_dst_pos_in_page_table_host_;
+  HostMemoryVector cross_attn_page_indptr_host_;
+  HostMemoryVector cross_attn_page_indices_host_;
+  HostMemoryVector cross_attn_last_page_len_host_;
+  HostMemoryVector cross_attn_k_rope_pos_offset_host_;
 
   //-------------------------------------------
   // For efficient memory management, the actual sizes of the arrays
@@ -951,6 +1016,10 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   std::vector<NDArray> page_indices_on_depths_view_;
   std::vector<NDArray> length_info_on_depths_view_;
   std::vector<NDArray> k_rope_pos_offset_view_;
+  NDArray cross_attn_page_indptr_view_;
+  NDArray cross_attn_page_indices_view_;
+  NDArray cross_attn_last_page_len_view_;
+  NDArray cross_attn_k_rope_pos_offset_view_;
 
   PackedFunc f_transpose_append_;
   PackedFunc f_compact_copy_;
@@ -1057,6 +1126,14 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         HostMemoryVector(prefill_chunk_size, dtype_aux_, preferred_host_device);
     append_position_map_host_ =
         HostMemoryVector(prefill_chunk_size, dtype_aux_, preferred_host_device);
+    cross_attn_page_indptr_host_ =
+        HostMemoryVector(reserved_num_seqs + 1, dtype_aux_, preferred_host_device);
+    cross_attn_page_indices_host_ =
+        HostMemoryVector(num_total_pages, dtype_aux_, preferred_host_device);
+    cross_attn_last_page_len_host_ =
+        HostMemoryVector(reserved_num_seqs, dtype_aux_, preferred_host_device);
+    cross_attn_k_rope_pos_offset_host_ =
+        HostMemoryVector(reserved_num_seqs, dtype_aux_, preferred_host_device);
     cur_append_lengths_indptr_host_ =
         HostMemoryVector(reserved_num_seqs + 1, dtype_aux_, preferred_host_device);
     tree_attn_mask_host_ =
@@ -1082,9 +1159,11 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       length_info_on_depths_view_.push_back(NDArray());
       k_rope_pos_offset_view_.push_back(NDArray());
     }
-    // Additional workspace for the "prefill with ragged kv" kernel.
-    temp_attn_workspace_.push_back(
-        NDArray::Empty({kAttnWorkspaceByte / 4}, DataType::Float(32), device));
+    // Additional workspace for the "prefill with ragged kv" kernel and cross attention.
+    for (int i = 0; i < 2; ++i) {
+      temp_attn_workspace_.push_back(
+          NDArray::Empty({kAttnWorkspaceByte / 4}, DataType::Float(32), device));
+    }
 
     temp_attn_q_device_ =
         NDArray::Empty({prefill_chunk_size_, num_qo_heads, head_dim}, dtype, device);
@@ -1173,6 +1252,13 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     if (block_idx != -1) {
       ICHECK_GT(global_block_pool_[block_idx].external_ref_cnt, 1);
       --global_block_pool_[block_idx].external_ref_cnt;
+    }
+    // - Release the cross attention block if it exists.
+    if (it->second.cross_attn_block_idx != -1) {
+      for (int32_t page_id : global_block_pool_[it->second.cross_attn_block_idx].page_ids) {
+        free_page_ids_.push_back(page_id);
+      }
+      free_block_idx_.push_back(block_idx);
     }
     seq_map_.erase(it);
     dirty_aux_data_device_ = true;
@@ -1434,13 +1520,15 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   /************** Attention **************/
 
   void BeginForward(const IntTuple& seq_ids, const IntTuple& append_lengths,
-                    const Optional<IntTuple>& opt_token_tree_parent_ptr) final {
+                    const Optional<IntTuple>& opt_token_tree_parent_ptr, bool append_kv) final {
     CHECK_EQ(seq_ids.size(), append_lengths.size())
         << "The seq_ids size (" << seq_ids.size() << ") and append_lengths size ("
         << append_lengths.size() << ") mismatch.";
+    dirty_aux_data_device_ = true;
     cur_batch_size_ = seq_ids.size();
     cur_seq_ids_ = seq_ids;
     cur_append_lengths_ = append_lengths;
+    append_kv_ = append_kv;
 
     // - Collect sequence/block/page information for attention.
     std::vector<Sequence*> sequences;
@@ -1457,7 +1545,9 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       last_block_length_before_append.push_back(
           global_block_pool_[it->second.last_block_idx].seq_length);
       k_ragged_rope_pos_offset_host_.push_back(it->second.seq_length);
-      it->second.seq_length += append_lengths[i];
+      if (append_kv) {
+        it->second.seq_length += append_lengths[i];
+      }
       if (append_lengths[i] != 1) {
         is_decode_request_ = false;
       }
@@ -1510,7 +1600,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     }
 
     append_before_attn_ = !support_sliding_window_ && num_depths_ == 1 && use_decode_kernel_[0];
-    if (append_before_attn_) {
+    if (append_kv && append_before_attn_) {
       // Right now we use different kernels when depth is 1 or not 1.
       // For the case where maximum depth is 1, we create the auxiliary
       // data structure with regard to the page table after appending.
@@ -1597,7 +1687,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       }
     }
 
-    if (!append_before_attn_) {
+    if (append_kv && !append_before_attn_) {
       // Right now we use different kernels when depth is 1 or not 1.
       // For the case where maximum depth is not 1, we create the auxiliary
       // data structure with regard to the page table before appending.
@@ -1638,6 +1728,29 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         }
       }
     }
+
+    // - Cross attention auxiliary data.
+    cross_attn_page_indptr_host_.clear();
+    cross_attn_page_indices_host_.clear();
+    cross_attn_last_page_len_host_.clear();
+    cross_attn_k_rope_pos_offset_host_.clear();
+    cross_attn_page_indptr_host_.push_back(0);
+    for (int i = 0; i < cur_batch_size_; ++i) {
+      cross_attn_k_rope_pos_offset_host_.push_back(0);
+      if (sequences[i]->cross_attn_block_idx == -1) {
+        cross_attn_page_indptr_host_.push_back(cross_attn_page_indptr_host_.back());
+        cross_attn_last_page_len_host_.push_back(0);
+        continue;
+      }
+      const Block& block = global_block_pool_[sequences[i]->cross_attn_block_idx];
+      cross_attn_page_indptr_host_.push_back(cross_attn_page_indptr_host_.back() +
+                                             block.page_ids.size());
+      for (int32_t page_id : block.page_ids) {
+        cross_attn_page_indices_host_.push_back(page_id);
+      }
+      ICHECK_NE(block.seq_length, 0);
+      cross_attn_last_page_len_host_.push_back((block.seq_length - 1) % page_size_ + 1);
+    }
   }
 
   void EndForward() final {
@@ -1650,6 +1763,47 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       f_attention_prefill_end_forward_.value()(d);
       f_attention_decode_end_forward_.value()(d);
     }
+  }
+
+  void BeginPushCrossAttnKVForward(const IntTuple& seq_ids, const IntTuple& append_lengths) final {
+    CHECK_EQ(seq_ids.size(), append_lengths.size())
+        << "The seq_ids size (" << seq_ids.size() << ") and append_lengths size ("
+        << append_lengths.size() << ") mismatch.";
+    dirty_aux_data_device_ = true;
+    cur_batch_size_ = seq_ids.size();
+    cur_seq_ids_ = seq_ids;
+    cur_append_lengths_ = append_lengths;
+
+    std::vector<Sequence*> sequences;
+    append_position_map_host_.clear();
+    for (int i = 0; i < cur_batch_size_; ++i) {
+      auto it = seq_map_.find(seq_ids[i]);
+      CHECK(it != seq_map_.end()) << "The sequence \"" << seq_ids[i]
+                                  << "\" cannot be found in KV cache.";
+      sequences.push_back(&it->second);
+      CHECK_EQ(it->second.cross_attn_block_idx, -1)
+          << "The sequence must have no cross attn block before.";
+      it->second.cross_attn_block_idx = GetFreeBlock();
+      it->second.cross_attn_seq_length = append_lengths[i];
+      Block& block = global_block_pool_[it->second.cross_attn_block_idx];
+      ++block.external_ref_cnt;
+      block.seq_length = append_lengths[i];
+      // - Allocate pages for the cross attn block.
+      int64_t tgt_npage = (append_lengths[i] + page_size_ - 1) / page_size_;
+      for (int64_t page_idx = 0; page_idx < tgt_npage; ++page_idx) {
+        block.page_ids.push_back(GetFreePage());
+      }
+
+      // - Set the append position map.
+      for (int64_t pos = 0; pos < append_lengths[i]; ++pos) {
+        append_position_map_host_.push_back(block.page_ids[pos / page_size_] * page_size_ +
+                                            pos % page_size_);
+      }
+    }
+  }
+
+  void EndPushCrossAttnKVForward() final {
+    // No-op
   }
 
   void AttentionWithFusedQKV(int64_t layer_id, NDArray qkv_data, Optional<NDArray> mask,
@@ -1695,15 +1849,146 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
                     rope_mode_ == RoPEMode::kNormal);
 
     // Part 3. Append k/v data to kv-cache if flag "append_before_attn" is set.
-    if (append_before_attn_) {
+    if (append_kv_ && append_before_attn_) {
       f_transpose_append_(pages_[layer_id], k_data, v_data, append_position_map_view_);
     }
     // Part 4: perform attention
     AttentionInternal(layer_id, q_data, k_data, v_data, o_data, attn_score_scaling_factor);
     // Part 5. Append k/v data to kv-cache if flag "append_before_attn" is not set.
-    if (!append_before_attn_) {
+    if (append_kv_ && !append_before_attn_) {
       f_transpose_append_(pages_[layer_id], k_data, v_data, append_position_map_view_);
     }
+  }
+
+  void AttentionNoAppend(int64_t layer_id, NDArray q_data, NDArray k_data, NDArray v_data,
+                         NDArray o_data, double attn_score_scaling_factor) final {
+    CHECK(rope_mode_ == RoPEMode::kNone) << "RoPE mode other than None is not supported";
+    // Part 1. Shape and dtype check.
+    CHECK(q_data.DataType() == pages_[layer_id].DataType());
+    CHECK(k_data.DataType() == pages_[layer_id].DataType());
+    CHECK(v_data.DataType() == pages_[layer_id].DataType());
+    CHECK(o_data.DataType() == pages_[layer_id].DataType());
+
+    // q_data: (num_total_length, num_qo_heads, head_dim)
+    // k_data: (num_total_length, num_kv_heads, head_dim)
+    // v_data: (num_total_length, num_kv_heads, head_dim)
+    // o_data: (num_total_length, num_qo_heads, head_dim)
+
+    CHECK_EQ(q_data->ndim, 3);
+    CHECK_EQ(k_data->ndim, 3);
+    CHECK_EQ(v_data->ndim, 3);
+    CHECK_EQ(o_data->ndim, 3);
+    for (int dim = 0; dim < 3; ++dim) {
+      if (dim == 1) {
+        CHECK_EQ(q_data->shape[1], num_qo_heads_);
+        CHECK_EQ(k_data->shape[1], num_kv_heads_);
+        CHECK_EQ(v_data->shape[1], num_kv_heads_);
+        CHECK_EQ(o_data->shape[1], num_qo_heads_);
+      } else {
+        CHECK_EQ(k_data->shape[dim], q_data->shape[dim]);
+        CHECK_EQ(v_data->shape[dim], q_data->shape[dim]);
+        CHECK_EQ(o_data->shape[dim], q_data->shape[dim]);
+      }
+    }
+
+    CHECK_EQ(q_data->shape[2], head_dim_);
+    int64_t total_seq_length = 0;
+    for (int64_t seq_id = 0; seq_id < cur_batch_size_; ++seq_id) {
+      total_seq_length += cur_append_lengths_[seq_id];
+    }
+    CHECK_EQ(total_seq_length, q_data->shape[0]);
+    // Sync the copy stream and the compute stream.
+    ComputeStreamWaitForCopyStream();
+    // The auxiliary data structure on device must have been synchronized.
+    ICHECK(!dirty_aux_data_device_);
+
+    // Part 2: perform attention
+    // LOG(INFO) << "scaling factor = " << attn_score_scaling_factor;
+    AttentionInternal(layer_id, q_data, k_data, v_data, o_data, attn_score_scaling_factor);
+  }
+
+  void CrossAttention(int64_t layer_id, NDArray q_data, NDArray o_data,
+                      double attn_score_scaling_factor) final {
+    CHECK(rope_mode_ == RoPEMode::kNone) << "RoPE mode other than None is not supported";
+    // Part 1. Shape and dtype check.
+    NDArray pages = pages_[layer_id];
+    CHECK(q_data.DataType() == pages.DataType());
+    CHECK(o_data.DataType() == pages.DataType());
+
+    // q_data: (num_total_length, num_qo_heads, head_dim)
+    // o_data: (num_total_length, num_qo_heads, head_dim)
+    CHECK_EQ(q_data->ndim, 3);
+    CHECK_EQ(o_data->ndim, 3);
+    for (int dim = 0; dim < 3; ++dim) {
+      CHECK_EQ(o_data->shape[dim], q_data->shape[dim]);
+    }
+
+    CHECK_EQ(q_data->shape[1], num_qo_heads_);
+    CHECK_EQ(q_data->shape[2], head_dim_);
+    int64_t total_seq_length = 0;
+    for (int64_t seq_id = 0; seq_id < cur_batch_size_; ++seq_id) {
+      total_seq_length += cur_append_lengths_[seq_id];
+    }
+    CHECK_EQ(total_seq_length, q_data->shape[0]);
+    // Part 2. Sync the copy stream and the compute stream.
+    ComputeStreamWaitForCopyStream();
+    // The auxiliary data structure on device must have been synchronized.
+    ICHECK(!dirty_aux_data_device_);
+
+    // Part 3: perform attention
+    CrossAttentionInternal(layer_id, q_data, o_data, attn_score_scaling_factor);
+  }
+
+  void PushCrossAttentionKV(int64_t layer_id, NDArray k_data, NDArray v_data) final {
+    CHECK(rope_mode_ == RoPEMode::kNone) << "RoPE mode other than None is not supported";
+    // Part 1. Shape and dtype check.
+    CHECK(k_data.DataType() == pages_[layer_id].DataType());
+    CHECK(v_data.DataType() == pages_[layer_id].DataType());
+
+    // k_data: (num_total_length, num_kv_heads, head_dim)
+    // v_data: (num_total_length, num_kv_heads, head_dim)
+    CHECK_EQ(k_data->ndim, 3);
+    CHECK_EQ(v_data->ndim, 3);
+    for (int dim = 0; dim < 3; ++dim) {
+      if (dim == 1) {
+        CHECK_EQ(k_data->shape[1], num_kv_heads_);
+        CHECK_EQ(v_data->shape[1], num_kv_heads_);
+      } else {
+        CHECK_EQ(k_data->shape[dim], v_data->shape[dim]);
+      }
+    }
+
+    CHECK_EQ(k_data->shape[2], head_dim_);
+    int64_t total_seq_length = 0;
+    for (int64_t seq_id = 0; seq_id < cur_batch_size_; ++seq_id) {
+      total_seq_length += cur_append_lengths_[seq_id];
+    }
+    CHECK_EQ(total_seq_length, k_data->shape[0]);
+
+    // Part 2: Sync append_position_map_view_ if it's not synced
+    if (dirty_aux_data_device_) {
+      std::vector<int64_t> arr;
+      for (int i = 0; i < append_position_map_host_.size(); ++i) {
+        arr.push_back(append_position_map_host_[i]);
+      }
+      // - Reset the copy.
+      ICHECK_EQ(total_seq_length, append_position_map_host_.size());
+      aux_data_manager_->ResetAttnAuxDataCopy();
+      append_position_map_view_ =
+          aux_data_manager_->CopyAppendPositionMapAsync(&append_position_map_host_);
+      // - Commit the copy.
+      aux_data_manager_->CommitAttnAuxDataCopy();
+      // - Clear the dirty flag.
+      dirty_aux_data_device_ = false;
+      // - If there is no particular copy stream, no action is needed.
+      // Otherwise sync two streams.
+      if (copy_stream_ != nullptr) {
+        DeviceAPI::Get(device_)->SyncStreamFromTo(device_, copy_stream_, compute_stream_);
+      }
+    }
+
+    // Part 3: Append
+    f_transpose_append_(pages_[layer_id], k_data, v_data, append_position_map_view_);
   }
 
   void CommitAcceptedTokenTreeNodes(const IntTuple& seq_ids, const IntTuple& leaf_indices) final {
@@ -1812,7 +2097,11 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     const Sequence& seq = seq_map_.at(seq_id);
     CHECK_GE(start_pos, 0) << "DebugGetKV does not accept negative start_pos " << start_pos;
     CHECK_LE(end_pos, seq.seq_length) << "DebugGetKV does not accept out-of-range end_pos";
-    CHECK_LT(start_pos, end_pos) << "DebugGetKV does not accept \"start_pos >= end_pos\"";
+    CHECK_LE(start_pos, end_pos) << "DebugGetKV does not accept \"start_pos >= end_pos\"";
+
+    if (start_pos == end_pos) {
+      return;
+    }
 
     // k/v_data: (num_layers, seq_length, num_kv_heads, head_dim)
     static constexpr const char* error_msg =
@@ -1847,6 +2136,47 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     position_map_device.CopyFromBytes(
         append_position_map.data() + start_pos,
         (end_pos - start_pos) * ((dtype_aux_.bits * dtype_aux_.lanes + 7) / 8));
+    for (int64_t layer_id = 0; layer_id < num_layers_; ++layer_id) {
+      f_debug_get_kv_.value()(pages_[layer_id], position_map_device, k_data, v_data, layer_id);
+    }
+  }
+
+  void DebugGetCrossAttnKV(int64_t seq_id, NDArray k_data, NDArray v_data) final {
+    CHECK(f_debug_get_kv_.defined())
+        << "PageAttentionKVCache requires the `f_debug_get_kv` to be explicitly passed in when "
+           "initialization. Please construct the KV cache with `f_debug_get_kv`.";
+
+    const Sequence& seq = seq_map_.at(seq_id);
+    CHECK(seq.cross_attn_block_idx != -1) << "The sequence has no cross attn KV";
+    const Block& block = global_block_pool_[seq.cross_attn_block_idx];
+
+    // k/v_data: (num_layers, seq_length, num_kv_heads, head_dim)
+    static constexpr const char* error_msg =
+        "DebugGetKV expects the k_data in layout (num_layers, seq_length, num_kv_heads, head_dim).";
+    std::vector<NDArray*> vec_kv_data = {&k_data, &v_data};
+    for (const NDArray* data_ptr : vec_kv_data) {
+      CHECK_EQ((*data_ptr)->ndim, 4) << error_msg;
+      CHECK_EQ((*data_ptr)->shape[0], num_layers_)
+          << error_msg << " The number of layers mismatches.";
+      CHECK_EQ((*data_ptr)->shape[1], block.seq_length)
+          << error_msg << " The sequence length mismatches.";
+      CHECK_EQ((*data_ptr)->shape[2], num_kv_heads_)
+          << error_msg << " The number of heads mismatches.";
+      CHECK_EQ((*data_ptr)->shape[3], head_dim_)
+          << error_msg << " The number of head features mismatches.";
+    }
+
+    std::vector<int32_t> append_position_map;
+    append_position_map.reserve(block.seq_length);
+    for (int i = 0; i < block.seq_length; ++i) {
+      int page_id = block.page_ids[i / page_size_];
+      int page_offset = i % page_size_;
+      append_position_map.push_back(page_id * page_size_ + page_offset);
+    }
+    NDArray position_map_device = NDArray::Empty({block.seq_length}, dtype_aux_, device_);
+    position_map_device.CopyFromBytes(
+        append_position_map.data(),
+        block.seq_length * ((dtype_aux_.bits * dtype_aux_.lanes + 7) / 8));
     for (int64_t layer_id = 0; layer_id < num_layers_; ++layer_id) {
       f_debug_get_kv_.value()(pages_[layer_id], position_map_device, k_data, v_data, layer_id);
     }
@@ -2069,8 +2399,6 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
         block.page_ids[i] = GetFreePage();
       }
     }
-
-    dirty_aux_data_device_ = true;
   }
 
   /*!
@@ -2180,7 +2508,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       return;
     }
 
-    if (append_before_attn_) {
+    if (append_kv_ && append_before_attn_) {
       if (!support_sliding_window_) {
         f_attention_decode_begin_forward_.value()(
             /*depth=*/0, temp_attn_workspace_[1], page_indptr_on_depths_host_[0].as_ndarray(),
@@ -2215,6 +2543,28 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     }
   }
 
+  void CrossAttnKernelBeginForward() {
+    if (!f_attention_prefill_begin_forward_.defined() ||
+        !f_attention_decode_begin_forward_.defined()) {
+      return;
+    }
+    if (cross_attn_page_indices_view_->shape[0] == 0) {
+      return;
+    }
+    if (is_decode_request_) {
+      f_attention_decode_begin_forward_.value()(
+          kCrossAttnHandlerId, temp_attn_workspace_.back(),
+          cross_attn_page_indptr_host_.as_ndarray(), cross_attn_last_page_len_host_.as_ndarray(),
+          num_qo_heads_, num_kv_heads_, head_dim_, page_size_,
+          /*rotary_mode=*/rope_mode_ == RoPEMode::kInline, copy_stream_);
+    } else {
+      f_attention_prefill_begin_forward_.value()(
+          kCrossAttnHandlerId, temp_attn_workspace_.back(),
+          cur_append_lengths_indptr_host_.as_ndarray(), cross_attn_last_page_len_view_->shape[0],
+          num_qo_heads_, num_kv_heads_, head_dim_, copy_stream_);
+    }
+  }
+
   /*!
    * \brief Compute attention for between the input q data and the
    * input k/v data and the k/v data in cache on the given layer.
@@ -2226,7 +2576,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     PackedFunc f_decode =
         !support_sliding_window_ ? f_attention_decode_ : f_attention_decode_sliding_window_;
     CHECK_GE(num_depths_, 1) << "The number of effective depths must be greater or equal to 1.";
-    if (append_before_attn_) {
+    if (append_kv_ && append_before_attn_) {
       f_decode(
           /*depth=*/0, q_data, pages_[layer_id], page_indptr_on_depths_view_[0],
           page_indices_on_depths_view_[0], length_info_on_depths_view_[0],
@@ -2236,12 +2586,18 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     } else {
       // Compute appended text self-attention
       if (is_chain_) {
+        // LOG(INFO) << "come here ragged";
+        // const PackedFunc* show_nd = Registry::Get("show_nd");
+        // LOG(INFO) << "rope_mode = " << static_cast<int>(rope_mode_);
+        // LOG(INFO) << "causal = " << !append_kv_;
+        // (*show_nd)("append_length_indptr", cur_append_length_indptr_view_);
+        // (*show_nd)("k_ragged_rope_pos_offset", k_ragged_rope_pos_offset_view_);
         // If the batch does not form a tree, use raggedness prefill kernel.
         f_attention_prefill_ragged_(q_data, cur_append_length_indptr_view_, k_data, v_data,
                                     cur_append_length_indptr_view_, q_rope_position_map_view_,
                                     k_ragged_rope_pos_offset_view_, output,
                                     merged_attn_scores_view_,
-                                    /*causal=*/1,
+                                    /*causal=*/append_kv_,
                                     /*rotary_mode=*/rope_mode_ == RoPEMode::kInline, rotary_scale_,
                                     rotary_theta_, attn_score_scaling_factor);
       } else {
@@ -2286,6 +2642,30 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     }
   }
 
+  void CrossAttentionInternal(int64_t layer_id, NDArray q_data, NDArray output,
+                              double attn_score_scaling_factor) {
+    CHECK_NE(cross_attn_page_indices_view_->shape[0], 0);
+    if (is_decode_request_) {
+      // Use decode kernel for depth d
+      f_attention_decode_(kCrossAttnHandlerId, q_data, pages_[layer_id],
+                          cross_attn_page_indptr_view_, cross_attn_page_indices_view_,
+                          cross_attn_last_page_len_view_, cross_attn_k_rope_pos_offset_view_,
+                          q_rope_position_map_view_, output, merged_attn_scores_view_,
+                          /*rotary_mode=*/rope_mode_ == RoPEMode::kInline, rotary_scale_,
+                          rotary_theta_, attn_score_scaling_factor);
+    } else {
+      // Use prefill kernel for depth d
+      f_attention_prefill_(
+          /*depth=*/kCrossAttnHandlerId, q_data, cur_append_length_indptr_view_, pages_[layer_id],
+          cross_attn_page_indptr_view_, cross_attn_page_indices_view_,
+          cross_attn_last_page_len_view_, cross_attn_k_rope_pos_offset_view_,
+          q_rope_position_map_view_, output, merged_attn_scores_view_,
+          /*causal=*/0,
+          /*rotary_mode=*/rope_mode_ == RoPEMode::kInline, rotary_scale_, rotary_theta_,
+          attn_score_scaling_factor);
+    }
+  }
+
   /*! \brief Synchronize the copy stream and the compute stream. */
   void ComputeStreamWaitForCopyStream() {
     if (!dirty_aux_data_device_) {
@@ -2295,6 +2675,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     // - Sync NDArrays to GPU.
     SyncAuxArrayToDevice();
     KernelBeginForward();
+    CrossAttnKernelBeginForward();
     // - Clear the dirty flag.
     dirty_aux_data_device_ = false;
     // - If there is no particular copy stream, no action is needed.
@@ -2384,7 +2765,19 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     // 9. append_position_map
     append_position_map_view_ =
         aux_data_manager_->CopyAppendPositionMapAsync(&append_position_map_host_);
-    // 10. tree_attn_mask and tree_attn_mn_indptr
+    // 10. cross_attn_page_indptr
+    cross_attn_page_indptr_view_ =
+        aux_data_manager_->CopyCrossAttnPageIndptrAsync(&cross_attn_page_indptr_host_);
+    // 11. cross_attn_page_indices
+    cross_attn_page_indices_view_ =
+        aux_data_manager_->CopyCrossAttnPageIndicesAsync(&cross_attn_page_indices_host_);
+    // 12. cross_attn_last_page_len
+    cross_attn_last_page_len_view_ =
+        aux_data_manager_->CopyCrossAttnLastPageLenAsync(&cross_attn_last_page_len_host_);
+    // 13. cross_attn_k_rope_pos_offset
+    cross_attn_k_rope_pos_offset_view_ =
+        aux_data_manager_->CopyCrossAttnKRoPEPosOffsetAsync(&cross_attn_k_rope_pos_offset_host_);
+    // 14. tree_attn_mask and tree_attn_mn_indptr
     if (!is_chain_) {
       tree_attn_mask_view_ = aux_data_manager_->CopyTreeAttnMaskAsync(&tree_attn_mask_host_);
       tree_attn_mn_indptr_view_ =
@@ -2393,7 +2786,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       tree_attn_mask_view_ = NDArray{nullptr};
       tree_attn_mn_indptr_view_ = NDArray{nullptr};
     }
-    // 11. Create view for temporary arrays for attention computation.
+    // 15. Create view for temporary arrays for attention computation.
     temp_attn_output_view_ = temp_attn_output_device_.CreateView(
         {total_append_length, num_qo_heads_, head_dim_}, temp_attn_output_device_->dtype);
     temp_attn_scores_view_ = temp_attn_scores_device_.CreateView(

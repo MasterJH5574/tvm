@@ -206,7 +206,8 @@ class RNNStateImpObj : public RNNStateObj {
   /************** Interaction **************/
 
   void BeginForward(const IntTuple& seq_ids, const IntTuple& append_lengths,
-                    const Optional<IntTuple>& opt_token_tree_parent_ptr) final {
+                    const Optional<IntTuple>& opt_token_tree_parent_ptr, bool append_kv) final {
+    CHECK(append_kv) << "Not appending KV is not supported.";
     CHECK_EQ(seq_ids.size(), append_lengths.size())
         << "The seq_ids size (" << seq_ids.size() << ") and append_lengths size ("
         << append_lengths.size() << ") mismatch.";

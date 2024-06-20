@@ -53,10 +53,16 @@ fenable_sliding_window_for_seq = None
 fpopn = None
 fbegin_forward = None
 fend_forward = None
+fbegin_push_cross_attn_kv_forward = None
+fend_push_cross_attn_kv_forward = None
 fcommit_accepted_token_tree_nodes = None
 fattention_with_fuse_qkv = None
+fattention_no_append = None
+fcross_attention = None
+fpush_cross_attention_kv = None
 fis_empty = None
 fdebug_get_kv = None
+fdebug_get_cross_attn_kv = None
 
 ftranspose_append = None
 fcopy_cache = None
@@ -76,7 +82,9 @@ fcompact_copy = None
 def set_global_func(head_dim, dtype):
     global fclear, fadd_sequence, fremove_sequence, ffork_sequence, fenable_sliding_window_for_seq
     global fpopn, fbegin_forward, fend_forward, fcommit_accepted_token_tree_nodes
-    global fattention_with_fuse_qkv, fis_empty, fdebug_get_kv
+    global fbegin_push_cross_attn_kv_forward, fend_push_cross_attn_kv_forward
+    global fattention_with_fuse_qkv, fattention_no_append, fcross_attention
+    global fpush_cross_attention_kv, fis_empty, fdebug_get_kv, fdebug_get_cross_attn_kv
     global ftranspose_append, fcopy_cache, fattn_prefill, fattn_decode
     global fattn_prefill_ragged, fattn_prefill_with_tree_mask
     global fattn_prefill_sliding_window, fattn_decode_sliding_window
@@ -92,14 +100,28 @@ def set_global_func(head_dim, dtype):
     fpopn = tvm.get_global_func("vm.builtin.kv_state_popn")
     fbegin_forward = tvm.get_global_func("vm.builtin.kv_state_begin_forward")
     fend_forward = tvm.get_global_func("vm.builtin.kv_state_end_forward")
+    fbegin_push_cross_attn_kv_forward = tvm.get_global_func(
+        "vm.builtin.attention_kv_cache_begin_push_cross_attn_kv_forward"
+    )
+    fend_push_cross_attn_kv_forward = tvm.get_global_func(
+        "vm.builtin.attention_kv_cache_end_push_cross_attn_kv_forward"
+    )
     fcommit_accepted_token_tree_nodes = tvm.get_global_func(
         "vm.builtin.attention_kv_cache_commit_accepted_token_tree_nodes"
     )
     fattention_with_fuse_qkv = tvm.get_global_func(
         "vm.builtin.attention_kv_cache_attention_with_fused_qkv"
     )
+    fattention_no_append = tvm.get_global_func("vm.builtin.attention_kv_cache_attention_no_append")
+    fcross_attention = tvm.get_global_func("vm.builtin.attention_kv_cache_cross_attention")
+    fpush_cross_attention_kv = tvm.get_global_func(
+        "vm.builtin.attention_kv_cache_push_cross_attention_kv"
+    )
     fis_empty = tvm.get_global_func("vm.builtin.attention_kv_cache_empty")
     fdebug_get_kv = tvm.get_global_func("vm.builtin.attention_kv_cache_debug_get_kv")
+    fdebug_get_cross_attn_kv = tvm.get_global_func(
+        "vm.builtin.attention_kv_cache_debug_get_cross_attn_kv"
+    )
 
     target = tvm.target.Target("cuda")
     builts = []
@@ -212,7 +234,7 @@ def kv_cache_and_config(request):
     return create_kv_cache(*request.param), rope_mode, support_sliding_window
 
 
-def verify_cached_kv(kv_cache, seq_ids, expected_k, expected_v):
+def verify_cached_kv(kv_cache, seq_ids, expected_k, expected_v, cross_attn: bool = False):
     for seq_id in seq_ids:
         keys_expected = expected_k[seq_id]
         values_expected = expected_v[seq_id]
@@ -220,7 +242,10 @@ def verify_cached_kv(kv_cache, seq_ids, expected_k, expected_v):
         seq_length = expected_k[seq_id].shape[1]
         keys = tvm.nd.empty(keys_expected.shape, dtype=dtype, device=device)
         values = tvm.nd.empty(values_expected.shape, dtype=dtype, device=device)
-        fdebug_get_kv(kv_cache, seq_id, 0, seq_length, keys, values)
+        if not cross_attn:
+            fdebug_get_kv(kv_cache, seq_id, 0, seq_length, keys, values)
+        else:
+            fdebug_get_cross_attn_kv(kv_cache, seq_id, keys, values)
         tvm.testing.assert_allclose(keys.numpy(), keys_expected, rtol=1e-3, atol=1e-3)
         tvm.testing.assert_allclose(values.numpy(), values_expected, rtol=1e-3, atol=1e-3)
 
@@ -253,10 +278,14 @@ def apply_attention(
     batch: List[Tuple[Union[int, Tuple[int, int, int]], int]],
     cached_k: Dict[int, np.ndarray],
     cached_v: Dict[int, np.ndarray],
+    *,
     sliding_window_sizes: Optional[List[int]] = None,
     attn_sink_sizes: Optional[List[int]] = None,
     token_tree_parent_ptr_list: Optional[List[List[int]]] = None,
     accepted_leaf_indices: Optional[List[int]] = None,
+    no_append: bool = False,
+    cross_attn_cached_k: Optional[Dict[int, np.ndarray]] = None,
+    cross_attn_cached_v: Optional[Dict[int, np.ndarray]] = None,
 ) -> None:
     seq_ids = []
     append_lengths = []
@@ -311,18 +340,27 @@ def apply_attention(
             if flattened_token_tree_parent_ptr is not None
             else None
         ),
+        not no_append,
     )
 
+    assert (cross_attn_cached_k is None) == (cross_attn_cached_v is None)
+    compute_cross_attn = cross_attn_cached_k is not None
     global_new_q = np.zeros((num_layers, 0, num_qo_heads, head_dim), dtype)
     global_new_k = np.zeros((num_layers, 0, num_kv_heads, head_dim), dtype)
     global_new_v = np.zeros((num_layers, 0, num_kv_heads, head_dim), dtype)
+    global_new_cross_attn_q = np.zeros((num_layers, 0, num_qo_heads, head_dim), dtype)
 
     q_array = []
+    cross_attn_q_array = []
     for i, (seq_id, append_length) in enumerate(batch):
         new_q = np.random.rand(num_layers, append_length, num_qo_heads, head_dim).astype(dtype)
         new_k = np.random.rand(num_layers, append_length, num_kv_heads, head_dim).astype(dtype)
         new_v = np.random.rand(num_layers, append_length, num_kv_heads, head_dim).astype(dtype)
+        new_cross_attn_q = np.random.rand(num_layers, append_length, num_qo_heads, head_dim).astype(
+            dtype
+        )
         q_array.append(new_q)
+        cross_attn_q_array.append(new_cross_attn_q)
 
         cached_k[seq_id] = np.concatenate(
             [
@@ -351,14 +389,25 @@ def apply_attention(
         global_new_q = np.concatenate([global_new_q, new_q], axis=1)
         global_new_k = np.concatenate([global_new_k, new_k], axis=1)
         global_new_v = np.concatenate([global_new_v, new_v], axis=1)
+        global_new_cross_attn_q = np.concatenate(
+            [global_new_cross_attn_q, new_cross_attn_q], axis=1
+        )
 
     for layer_id in range(num_layers):
+        # Part 1. Self attention
         queries_np = global_new_q[layer_id]
         keys_np = global_new_k[layer_id]
         values_np = global_new_v[layer_id]
-        qkv = tvm.nd.array(np.concatenate([queries_np, keys_np, values_np], axis=1), device)
-        outputs = tvm.nd.empty(queries_np.shape, dtype, device=device)
-        fattention_with_fuse_qkv(kv_cache, layer_id, 1.0, qkv, outputs)
+        if not no_append:
+            qkv = tvm.nd.array(np.concatenate([queries_np, keys_np, values_np], axis=1), device)
+            outputs = tvm.nd.empty(queries_np.shape, dtype, device=device)
+            fattention_with_fuse_qkv(kv_cache, layer_id, 1.0, qkv, outputs)
+        else:
+            q = tvm.nd.array(queries_np, device)
+            k = tvm.nd.array(keys_np, device)
+            v = tvm.nd.array(values_np, device)
+            outputs = tvm.nd.empty(queries_np.shape, dtype, device=device)
+            fattention_no_append(kv_cache, layer_id, 1.0, q, k, v, outputs)
 
         # Compute attention expected results.
         outputs = np.expand_dims(outputs.numpy(), axis=0)
@@ -419,8 +468,47 @@ def apply_attention(
                 tree_mask = np.broadcast_to(tree_mask, (num_qo_heads, *tree_mask.shape))
                 mask[:, :, length_diff:] = tree_mask
 
-            softmax_input = np.minimum(softmax_input, mask)
+            if not no_append:
+                softmax_input = np.minimum(softmax_input, mask)
 
+            results = np.expand_dims(
+                (scipy.special.softmax(softmax_input, axis=-1) @ v_seq.astype("float32")).transpose(
+                    1, 0, 2
+                ),
+                axis=0,
+            ).astype(dtype)
+
+            tvm.testing.assert_allclose(
+                outputs[:, sum_length : sum_length + append_length, ...],
+                results,
+                rtol=1e-3,
+                atol=1e-3,
+            )
+            sum_length += append_length
+
+        # Part 2. Cross attention
+        if not compute_cross_attn:
+            continue
+        assert rope_mode == RopeMode.NONE, "RoPE mode other than None is not supported"
+        cross_attn_queries_np = global_new_cross_attn_q[layer_id]
+        q = tvm.nd.array(cross_attn_queries_np, device)
+        outputs = tvm.nd.empty(cross_attn_queries_np.shape, dtype, device=device)
+        fcross_attention(kv_cache, layer_id, 1.0, q, outputs)
+
+        # Compute attention expected results.
+        outputs = np.expand_dims(outputs.numpy(), axis=0)
+        sum_length = 0
+        for i, (seq_id, append_length) in enumerate(batch):
+            assert cross_attn_cached_k[seq_id].shape[1] == cross_attn_cached_v[seq_id].shape[1]
+
+            rope_offset = cached_k[seq_id].shape[1] - append_length
+            q_seq = cross_attn_q_array[i][layer_id].transpose(1, 0, 2)
+            k_seq = cross_attn_cached_k[seq_id][layer_id].transpose(1, 2, 0)
+            v_seq = cross_attn_cached_v[seq_id][layer_id].transpose(1, 0, 2)
+
+            k_seq = np.repeat(k_seq, num_qo_heads // num_kv_heads, axis=0)
+            v_seq = np.repeat(v_seq, num_qo_heads // num_kv_heads, axis=0)
+            softmax_input = (q_seq.astype("float32") @ k_seq.astype("float32")) / np.sqrt(head_dim)
             results = np.expand_dims(
                 (scipy.special.softmax(softmax_input, axis=-1) @ v_seq.astype("float32")).transpose(
                     1, 0, 2
@@ -438,6 +526,7 @@ def apply_attention(
     fend_forward(kv_cache)
 
     if accepted_leaf_indices is not None:
+        assert not no_append
         seq_ids = [seq_id for seq_id, _ in batch]
         fcommit_accepted_token_tree_nodes(
             kv_cache, ShapeTuple(seq_ids), ShapeTuple(accepted_leaf_indices)
@@ -466,6 +555,12 @@ def apply_attention(
                 cached_k[seq_id] = cached_k[seq_id][:, :-length_to_pop, ...]
                 cached_v[seq_id] = cached_v[seq_id][:, :-length_to_pop, ...]
 
+    if no_append:
+        # The new KV is not appended into the KV cache
+        for seq_id, append_length in batch:
+            cached_k[seq_id] = cached_k[seq_id][:, :-append_length, ...]
+            cached_v[seq_id] = cached_v[seq_id][:, :-append_length, ...]
+
     for seq_id, _ in batch:
         if sliding_window_sizes is not None and len(sliding_window_sizes) > seq_id:
             sliding_window_size = sliding_window_sizes[seq_id]
@@ -491,6 +586,53 @@ def apply_attention(
 
     # Verify
     verify_cached_kv(kv_cache, seq_ids, cached_k, cached_v)
+    if compute_cross_attn:
+        verify_cached_kv(
+            kv_cache, seq_ids, cross_attn_cached_k, cross_attn_cached_v, cross_attn=True
+        )
+
+
+def push_cross_attn_kv(
+    kv_cache,
+    rope_mode: RopeMode,
+    batch: List[Tuple[Union[int, Tuple[int, int, int]], int]],
+    cross_attn_cached_k: Dict[int, np.ndarray],
+    cross_attn_cached_v: Dict[int, np.ndarray],
+    cached_k: Dict[int, np.ndarray],
+    cached_v: Dict[int, np.ndarray],
+) -> None:
+    assert rope_mode == RopeMode.NONE, "RoPE mode other than None is not supported"
+    seq_ids = []
+    append_lengths = []
+    for seq_id, append_length in batch:
+        seq_ids.append(seq_id)
+        append_lengths.append(append_length)
+        assert seq_id in cached_k
+        assert seq_id not in cross_attn_cached_k
+
+    fbegin_push_cross_attn_kv_forward(kv_cache, ShapeTuple(seq_ids), ShapeTuple(append_lengths))
+
+    global_new_k = np.zeros((num_layers, 0, num_kv_heads, head_dim), dtype)
+    global_new_v = np.zeros((num_layers, 0, num_kv_heads, head_dim), dtype)
+
+    for seq_id, append_length in batch:
+        new_k = np.random.rand(num_layers, append_length, num_kv_heads, head_dim).astype(dtype)
+        new_v = np.random.rand(num_layers, append_length, num_kv_heads, head_dim).astype(dtype)
+        cross_attn_cached_k[seq_id] = new_k
+        cross_attn_cached_v[seq_id] = new_v
+        global_new_k = np.concatenate([global_new_k, new_k], axis=1)
+        global_new_v = np.concatenate([global_new_v, new_v], axis=1)
+
+    for layer_id in range(num_layers):
+        k = tvm.nd.array(global_new_k[layer_id], device)
+        v = tvm.nd.array(global_new_v[layer_id], device)
+        fpush_cross_attention_kv(kv_cache, layer_id, k, v)
+
+    fend_push_cross_attn_kv_forward(kv_cache)
+
+    # Verify
+    verify_cached_kv(kv_cache, seq_ids, cached_k, cached_v)
+    verify_cached_kv(kv_cache, seq_ids, cross_attn_cached_k, cross_attn_cached_v, cross_attn=True)
 
 
 @tvm.testing.requires_gpu
@@ -730,8 +872,8 @@ def test_paged_attention_kv_cache_sliding_window(kv_cache_and_config):
             batch,
             cached_k,
             cached_v,
-            sliding_window_sizes,
-            attn_sink_sizes,
+            sliding_window_sizes=sliding_window_sizes,
+            attn_sink_sizes=attn_sink_sizes,
         )
     # Decode
     batch = [(0, 1), (1, 1), (2, 1), (3, 1), (4, 1)]
@@ -742,8 +884,8 @@ def test_paged_attention_kv_cache_sliding_window(kv_cache_and_config):
             batch,
             cached_k,
             cached_v,
-            sliding_window_sizes,
-            attn_sink_sizes,
+            sliding_window_sizes=sliding_window_sizes,
+            attn_sink_sizes=attn_sink_sizes,
         )
 
     # Sliding window with fork
@@ -761,8 +903,8 @@ def test_paged_attention_kv_cache_sliding_window(kv_cache_and_config):
             [(6, 10)],
             cached_k,
             cached_v,
-            sliding_window_sizes,
-            attn_sink_sizes,
+            sliding_window_sizes=sliding_window_sizes,
+            attn_sink_sizes=attn_sink_sizes,
         )
     for _ in range(16):
         apply_attention(
@@ -771,8 +913,8 @@ def test_paged_attention_kv_cache_sliding_window(kv_cache_and_config):
             [(6, 1)],
             cached_k,
             cached_v,
-            sliding_window_sizes,
-            attn_sink_sizes,
+            sliding_window_sizes=sliding_window_sizes,
+            attn_sink_sizes=attn_sink_sizes,
         )
 
 
@@ -832,6 +974,44 @@ def test_paged_attention_kv_cache_tree_attn(kv_cache_and_config):
     # Do 5 rounds of decode.
     for _ in range(5):
         apply_attention(kv_cache, rope_mode, [(0, 1), (1, 1), (2, 1), (3, 1)], cached_k, cached_v)
+
+
+@tvm.testing.requires_gpu
+@tvm.testing.requires_cuda
+def test_paged_attention_kv_cache_encoder_decoder(kv_cache_and_config):
+    kv_cache, rope_mode, _ = kv_cache_and_config
+    if rope_mode != RopeMode.NONE:
+        # RoPE mode other than None is not supported
+        return
+    fclear(kv_cache)
+
+    # Encoder self-attention.
+    cached_k = {}
+    cached_v = {}
+    cross_attn_cached_k = {}
+    cross_attn_cached_v = {}
+    batch = [(0, 6), (1, 8), (2, 11), (3, 16), (4, 19), (5, 5)]
+    apply_attention(kv_cache, rope_mode, batch, cached_k, cached_v, no_append=True)
+
+    batch = [(0, 70), (1, 43), (3, 19), (4, 7)]
+    push_cross_attn_kv(
+        kv_cache, rope_mode, batch, cross_attn_cached_k, cross_attn_cached_v, cached_k, cached_v
+    )
+    for _ in range(10):
+        apply_attention(
+            kv_cache,
+            rope_mode,
+            [(0, 1), (1, 1), (3, 1), (4, 1)],
+            cached_k,
+            cached_v,
+            cross_attn_cached_k=cross_attn_cached_k,
+            cross_attn_cached_v=cross_attn_cached_v,
+        )
+
+    num_sequence = 6
+    for seq_id in range(num_sequence):
+        fremove_sequence(kv_cache, seq_id)
+    assert fis_empty(kv_cache), "The KV cache is not empty after removing all sequences"
 
 
 def kv_cache_transpose_append(head_dim, dtype):
@@ -2593,3 +2773,4 @@ if __name__ == "__main__":
         test_paged_attention_kv_cache_sliding_window(cache_and_config)
         test_paged_attention_kv_cache_tree_attn(cache_and_config)
         test_paged_attention_kv_cache_unlimited_depth(cache_and_config)
+        test_paged_attention_kv_cache_encoder_decoder(cache_and_config)

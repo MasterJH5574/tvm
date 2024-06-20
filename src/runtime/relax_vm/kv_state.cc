@@ -41,16 +41,20 @@ TVM_REGISTER_GLOBAL("vm.builtin.kv_state_fork_sequence")
 TVM_REGISTER_GLOBAL("vm.builtin.kv_state_popn").set_body_method<KVState>(&KVStateObj::PopN);
 TVM_REGISTER_GLOBAL("vm.builtin.kv_state_begin_forward")
     .set_body([](TVMArgs args, TVMRetValue* rv) {
-      CHECK(args.size() == 3 || args.size() == 4)
+      CHECK(args.size() == 3 || args.size() == 4 || args.size() == 5)
           << "KVState BeginForward only accepts 3 or 4 arguments";
       KVState kv_state = args[0];
       IntTuple seq_ids = args[1];
       IntTuple append_lengths = args[2];
       Optional<IntTuple> token_tree_parent_ptr{nullptr};
-      if (args.size() == 4) {
+      bool append_kv = true;
+      if (args.size() >= 4) {
         token_tree_parent_ptr = args[3].operator Optional<IntTuple>();
       }
-      kv_state->BeginForward(seq_ids, append_lengths, token_tree_parent_ptr);
+      if (args.size() >= 5) {
+        append_kv = args[4];
+      }
+      kv_state->BeginForward(seq_ids, append_lengths, token_tree_parent_ptr, append_kv);
     });
 TVM_REGISTER_GLOBAL("vm.builtin.kv_state_end_forward")
     .set_body_method<KVState>(&KVStateObj::EndForward);
@@ -70,12 +74,37 @@ TVM_REGISTER_GLOBAL("vm.builtin.attention_kv_cache_get_query_positions")
     .set_body_method<AttentionKVCache>(&AttentionKVCacheObj::GetQueryPositions);
 TVM_REGISTER_GLOBAL("vm.builtin.attention_kv_cache_debug_get_kv")
     .set_body_method<AttentionKVCache>(&AttentionKVCacheObj::DebugGetKV);
+TVM_REGISTER_GLOBAL("vm.builtin.attention_kv_cache_debug_get_cross_attn_kv")
+    .set_body_method<AttentionKVCache>(&AttentionKVCacheObj::DebugGetCrossAttnKV);
 TVM_REGISTER_GLOBAL("vm.builtin.attention_kv_cache_attention_with_fused_qkv")
     .set_body_typed([](AttentionKVCache kv_cache, int64_t layer_id,
                        double attn_score_scaling_factor, NDArray qkv_data, NDArray o_data) {
       kv_cache->AttentionWithFusedQKV(layer_id, std::move(qkv_data), NullOpt, std::move(o_data),
                                       attn_score_scaling_factor);
     });
+TVM_REGISTER_GLOBAL("vm.builtin.attention_kv_cache_attention_no_append")
+    .set_body_typed([](AttentionKVCache kv_cache, int64_t layer_id,
+                       double attn_score_scaling_factor, NDArray q_data, NDArray k_data,
+                       NDArray v_data, NDArray o_data) {
+      kv_cache->AttentionNoAppend(layer_id, std::move(q_data), std::move(k_data), std::move(v_data),
+                                  std::move(o_data), attn_score_scaling_factor);
+    });
+TVM_REGISTER_GLOBAL("vm.builtin.attention_kv_cache_cross_attention")
+    .set_body_typed([](AttentionKVCache kv_cache, int64_t layer_id,
+                       double attn_score_scaling_factor, NDArray q_data, NDArray o_data) {
+      kv_cache->CrossAttention(layer_id, std::move(q_data), std::move(o_data),
+                               attn_score_scaling_factor);
+    });
+TVM_REGISTER_GLOBAL("vm.builtin.attention_kv_cache_push_cross_attention_kv")
+    .set_body_typed([](AttentionKVCache kv_cache, int64_t layer_id, NDArray k_data,
+                       NDArray v_data) {
+      kv_cache->PushCrossAttentionKV(layer_id, std::move(k_data), std::move(v_data));
+      return kv_cache;
+    });
+TVM_REGISTER_GLOBAL("vm.builtin.attention_kv_cache_begin_push_cross_attn_kv_forward")
+    .set_body_method<AttentionKVCache>(&AttentionKVCacheObj::BeginPushCrossAttnKVForward);
+TVM_REGISTER_GLOBAL("vm.builtin.attention_kv_cache_end_push_cross_attn_kv_forward")
+    .set_body_method<AttentionKVCache>(&AttentionKVCacheObj::EndPushCrossAttnKVForward);
 
 // RNN State methods
 TVM_REGISTER_GLOBAL("vm.builtin.rnn_state_get").set_body_method<RNNState>(&RNNStateObj::Get);

@@ -803,6 +803,9 @@ class Matmul(GPUScheduleRule):
         sch = tir.Schedule(func)
         root_block = analysis.get_root_block(sch)
         blocks = sch.get_child_blocks(root_block)
+        for block in blocks:
+            if "conv1d" in sch.get(block).name_hint:
+                return None
 
         reduction_blocks = get_reduction_blocks(sch, blocks)
         if reduction_blocks is None:
