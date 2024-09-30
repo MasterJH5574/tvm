@@ -1,3 +1,4 @@
+
 /*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -54,9 +55,9 @@ namespace relax_vm {
  * \brief The maximum allowed block depth (a.k.a. number of common
  * prefixes) in paged KV cache.
  */
-constexpr const int kPagedKVCacheMaxBlockDepth = 2;
+constexpr const int kPagedKVCacheMaxBlockDepth = 1;
 /*! \brief The maximum tree size of a single sequence in tree attention. */
-constexpr const int kTreeAttnMaxTreeSize = 256;
+constexpr const int kTreeAttnMaxTreeSize = 12;
 /*! \brief The 1MB workspace size for integer attention auxiliary data. */
 constexpr const int kIntAttnWorkspaceByte = 1 * 1024 * 1024;
 /*! \brief The 128MB workspace size for floating-point attention auxiliary data. */
@@ -156,6 +157,8 @@ struct Sequence {
    * in the KV cache even when sliding window is enabled.
    */
   int last_block_attn_sink_size = 0;
+
+  int rope_offset = 0;
 
   /*! \brief Whether the current appended tokens form a chain (not a tree). */
   bool is_chain = true;
@@ -1505,7 +1508,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
       sequences.push_back(&it->second);
       last_block_length_before_append.push_back(
           global_block_pool_[it->second.last_block_idx].seq_length);
-      int k_rope_offset = it->second.seq_length;
+      int k_rope_offset = it->second.seq_length + it->second.rope_offset;
       if (!it->second.accepted_indices_committed) {
         int tree_size = static_cast<int>(it->second.token_tree_parent_ptr.size());
         k_rope_offset -= tree_size;
@@ -1797,6 +1800,45 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     }
   }
 
+  NDArray AppendKVWithOutput(int64_t layer_id, NDArray k_data, NDArray v_data, int context_length,
+                             NDArray dummy_output) final {
+    // Part 1. Shape and dtype check.
+    int64_t local_layer_id = layer_id - layer_id_begin_offset_;
+    CHECK_GE(local_layer_id, 0);
+    CHECK_LT(local_layer_id, num_layers_);
+    NDArray pages = pages_[local_layer_id];
+    CHECK(k_data.DataType() == pages.DataType());
+    CHECK(v_data.DataType() == pages.DataType());
+
+    CHECK_EQ(k_data->ndim, 3);
+    CHECK_EQ(v_data->ndim, 3);
+    int64_t total_seq_length = 0;
+    for (int64_t seq_id = 0; seq_id < cur_batch_size_; ++seq_id) {
+      total_seq_length += cur_append_lengths_[seq_id];
+    }
+    CHECK_EQ(k_data->shape[0], total_seq_length);
+    CHECK_EQ(v_data->shape[0], total_seq_length);
+    CHECK_EQ(k_data->shape[1], num_kv_heads_);
+    CHECK_EQ(v_data->shape[1], num_kv_heads_);
+    CHECK_EQ(k_data->shape[2], head_dim_);
+    CHECK_EQ(v_data->shape[2], head_dim_);
+
+    CHECK_EQ(cur_batch_size_, 1);
+    CHECK_GE(context_length, total_seq_length);
+    // Set the length offset of the running seq to the context length.
+    if (layer_id == 0) {
+      seq_map_.at(cur_seq_ids_[0]).rope_offset = context_length - total_seq_length;
+    }
+
+    // Sync the copy stream and the compute stream.
+    ComputeStreamWaitForCopyStream(false);
+    // The auxiliary data structure on device must have been synchronized.
+    ICHECK(!dirty_aux_data_device_);
+
+    f_transpose_append_(pages_[local_layer_id], k_data, v_data, append_position_map_view_);
+    return dummy_output;
+  }
+
   void CommitAcceptedTokenTreeNodes(const IntTuple& seq_ids, const IntTuple& leaf_indices) final {
     CHECK_EQ(seq_ids.size(), leaf_indices.size())
         << "The given seq_ids and leaf_indices have different size.";
@@ -1822,6 +1864,7 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     }
 
     if (!is_chain) {
+      CHECK(false);
       commit_copy_length_indptr_host_.clear();
       commit_copy_src_pos_in_page_table_host_.clear();
       commit_copy_dst_pos_in_page_table_host_.clear();
@@ -1897,8 +1940,22 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     return q_rope_position_map_view_;
   };
 
-  void DebugGetKV(int64_t seq_id, int64_t start_pos, int64_t end_pos, NDArray k_data,
-                  NDArray v_data) final {
+  Array<NDArray> DebugGetLastQKV() final {
+    int64_t total_seq_length = 0;
+    for (int64_t seq_id = 0; seq_id < cur_batch_size_; ++seq_id) {
+      total_seq_length += cur_append_lengths_[seq_id];
+    }
+    NDArray q_data = temp_attn_q_device_.CreateView({total_seq_length, num_qo_heads_, head_dim_},
+                                                    pages_[0]->dtype);
+    NDArray k_data = temp_attn_k_device_.CreateView({total_seq_length, num_kv_heads_, head_dim_},
+                                                    pages_[0]->dtype);
+    NDArray v_data = temp_attn_v_device_.CreateView({total_seq_length, num_kv_heads_, head_dim_},
+                                                    pages_[0]->dtype);
+    return {q_data, k_data, v_data};
+  }
+
+  void DebugGetKV(int64_t seq_id, int64_t layer_id, int64_t start_pos, int64_t end_pos,
+                  NDArray k_data, NDArray v_data) final {
     CHECK(f_debug_get_kv_.defined())
         << "PageAttentionKVCache requires the `f_debug_get_kv` to be explicitly passed in when "
            "initialization. Please construct the KV cache with `f_debug_get_kv`.";
@@ -1914,8 +1971,12 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     std::vector<NDArray*> vec_kv_data = {&k_data, &v_data};
     for (const NDArray* data_ptr : vec_kv_data) {
       CHECK_EQ((*data_ptr)->ndim, 4) << error_msg;
-      CHECK_EQ((*data_ptr)->shape[0], num_layers_)
-          << error_msg << " The number of layers mismatches.";
+      if (layer_id == -1) {
+        CHECK_EQ((*data_ptr)->shape[0], num_layers_)
+            << error_msg << " The number of layers mismatches.";
+      } else {
+        CHECK_EQ((*data_ptr)->shape[0], 1);
+      }
       CHECK_EQ((*data_ptr)->shape[1], end_pos - start_pos)
           << error_msg << " The sequence length mismatches.";
       CHECK_EQ((*data_ptr)->shape[2], num_kv_heads_)
@@ -1941,8 +2002,12 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
     position_map_device.CopyFromBytes(
         append_position_map.data() + start_pos,
         (end_pos - start_pos) * ((dtype_aux_.bits * dtype_aux_.lanes + 7) / 8));
-    for (int64_t layer_id = 0; layer_id < num_layers_; ++layer_id) {
-      f_debug_get_kv_.value()(pages_[layer_id], position_map_device, k_data, v_data, layer_id);
+    if (layer_id == -1) {
+      for (int64_t layer_id = 0; layer_id < num_layers_; ++layer_id) {
+        f_debug_get_kv_.value()(pages_[layer_id], position_map_device, k_data, v_data, layer_id);
+      }
+    } else {
+      f_debug_get_kv_.value()(pages_[layer_id], position_map_device, k_data, v_data, 0);
     }
   }
 
@@ -2456,14 +2521,16 @@ class PagedAttentionKVCacheObj : public AttentionKVCacheObj {
   }
 
   /*! \brief Synchronize the copy stream and the compute stream. */
-  void ComputeStreamWaitForCopyStream() {
+  void ComputeStreamWaitForCopyStream(bool kernel_begin_forward = true) {
     if (!dirty_aux_data_device_) {
       // If the auxiliary data is already synced, return and no need to sync again.
       return;
     }
     // - Sync NDArrays to GPU.
     SyncAuxArrayToDevice();
-    KernelBeginForward();
+    if (kernel_begin_forward) {
+      KernelBeginForward();
+    }
     // - Clear the dirty flag.
     dirty_aux_data_device_ = false;
     // - If there is no particular copy stream, no action is needed.

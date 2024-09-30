@@ -173,6 +173,9 @@ class AttentionKVCacheObj : public KVStateObj {
   virtual void AttentionWithFusedQKV(int64_t layer_id, NDArray qkv_data, Optional<NDArray> mask,
                                      NDArray o_data, double attn_score_scaling_factor) = 0;
 
+  virtual NDArray AppendKVWithOutput(int64_t layer_id, NDArray k_data, NDArray v_data,
+                                     int context_length, NDArray dummy_output) = 0;
+
   /************** Positions **************/
 
   /*!
@@ -183,6 +186,8 @@ class AttentionKVCacheObj : public KVStateObj {
   virtual NDArray GetQueryPositions() = 0;
 
   /************** Debug Helpers **************/
+
+  virtual Array<NDArray> DebugGetLastQKV() = 0;
 
   /*!
    * \brief Fetch the compact K/V data of the given sequence.
@@ -201,7 +206,7 @@ class AttentionKVCacheObj : public KVStateObj {
    * \param K_data The output K data of the given sequence in layout elaborated above.
    * \param V_data The output V data of the given sequence in layout elaborated above.
    */
-  virtual void DebugGetKV(int64_t seq_id,  //
+  virtual void DebugGetKV(int64_t seq_id, int64_t layer_id,  //
                           int64_t start_pos, int64_t end_pos, NDArray k_data, NDArray v_data) = 0;
 
   /*!

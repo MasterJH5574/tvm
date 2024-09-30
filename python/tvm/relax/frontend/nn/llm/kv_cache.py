@@ -452,14 +452,15 @@ def _kv_cache_debug_get_kv(num_hidden_layers, num_key_value_heads, head_dim, dty
         T.func_attr({"tir.noalias": T.bool(True)})
         seqlen = T.SizeVar("num_tokens_including_cache", "int64")
         page_size = T.SizeVar("page_size", "int64")
+        num_layers = T.SizeVar("num_layers", "int64")
         num_pages = T.int64()
         position_map_elem_offset = T.int64()
         pages = T.match_buffer(var_pages, (num_pages, 2, num_key_value_heads, page_size, head_dim), dtype)
         position_map = T.match_buffer(
             var_position_map, (seqlen,), "int32", elem_offset=position_map_elem_offset
         )
-        k_data = T.match_buffer(var_k_data, (num_hidden_layers, seqlen, num_key_value_heads, head_dim), dtype)
-        v_data = T.match_buffer(var_v_data, (num_hidden_layers, seqlen, num_key_value_heads, head_dim), dtype)
+        k_data = T.match_buffer(var_k_data, (num_layers, seqlen, num_key_value_heads, head_dim), dtype)
+        v_data = T.match_buffer(var_v_data, (num_layers, seqlen, num_key_value_heads, head_dim), dtype)
         for p, h, d in T.grid(seqlen, num_key_value_heads, head_dim):
             with T.block("copy0"):
                 vp, vh, vd = T.axis.remap("SSS", [p, h, d])

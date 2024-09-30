@@ -68,8 +68,12 @@ TVM_REGISTER_GLOBAL("vm.builtin.attention_kv_cache_get_total_sequence_length")
     .set_body_method<AttentionKVCache>(&AttentionKVCacheObj::GetTotalSequenceLength);
 TVM_REGISTER_GLOBAL("vm.builtin.attention_kv_cache_get_query_positions")
     .set_body_method<AttentionKVCache>(&AttentionKVCacheObj::GetQueryPositions);
+TVM_REGISTER_GLOBAL("vm.builtin.attention_kv_cache_debug_get_last_qkv")
+    .set_body_method<AttentionKVCache>(&AttentionKVCacheObj::DebugGetLastQKV);
 TVM_REGISTER_GLOBAL("vm.builtin.attention_kv_cache_debug_get_kv")
     .set_body_method<AttentionKVCache>(&AttentionKVCacheObj::DebugGetKV);
+TVM_REGISTER_GLOBAL("vm.builtin.attention_kv_cache_append_kv_with_output")
+    .set_body_method<AttentionKVCache>(&AttentionKVCacheObj::AppendKVWithOutput);
 TVM_REGISTER_GLOBAL("vm.builtin.attention_kv_cache_attention_with_fused_qkv")
     .set_body_typed([](AttentionKVCache kv_cache, int64_t layer_id,
                        double attn_score_scaling_factor, NDArray qkv_data, NDArray o_data) {
