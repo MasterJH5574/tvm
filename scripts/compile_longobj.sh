@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
-source /opt/spack/share/spack/setup-env.sh
-spack unload
-spack load gcc@11.3.0 /ohhhwxj
-spack load python@3.9.12%gcc@=11.3.0
+# source /opt/spack/share/spack/setup-env.sh
+# spack unload
+# spack load gcc@11.3.0 /ohhhwxj
+# spack load python@3.9.12%gcc@=11.3.0
 
 set -x
 BUILD_DIR="${BUILD_DIR:-`pwd`/../build}"
@@ -12,7 +12,7 @@ if [ ! -d $BUILD_DIR ]; then
     mkdir $BUILD_DIR
 fi
 if [ ! -d $CPYTHON_DIR ]; then
-    git clone git@github.com:python/cpython.git $CPYTHON_DIR
+    git clone https://github.com/python/cpython.git $CPYTHON_DIR
 fi
 TAG=v3.9.12
 if [ ! -f $BUILD_DIR/ldlong.${TAG}.so ]; then

@@ -1,3 +1,38 @@
+# 15-745 Project - MagPy with TVM
+
+This branch is the integration of MagPy with TVM, for eager-mode DNN
+program compilation in TVM.
+
+## Project Reports
+
+* [Project proposal](reports/15745_Project_Proposal.pdf)
+* [Project milestone report](reports/15745_Project_Milestone_Report.pdf)
+* Project final report (TBA)
+
+## Reproduce the results
+
+Please follow the steps below to reproduce the evaluation results.
+
+**Step 1.** Install TVM via
+
+```bash
+python -m pip install --pre -U -f https://mlc.ai/wheels mlc-ai-nightly-cu123
+```
+
+**Step 2.** Install MagPy by following [the MagPy installation](#installation).
+
+**Step 3.** Run evaluation via
+
+```bash
+./eval_script/run_15.sh
+```
+
+
+
+---
+
+(Below is the original README content of the MagPy project.)
+
 # MagPy
 MagPy is a JIT compiler for PyTorch programs. It can extract the operator graph from PyTorch programs and optimize the graph with a wide range of deep learning graph compilers.
 
