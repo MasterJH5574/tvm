@@ -7,7 +7,7 @@ program compilation in TVM.
 
 * [Project proposal](reports/15745_Project_Proposal.pdf)
 * [Project milestone report](reports/15745_Project_Milestone_Report.pdf)
-* Project final report (TBA)
+* [Project final report](reports/15745_Project_Final_Report.pdf)
 
 ## Reproduce the results
 
