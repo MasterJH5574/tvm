@@ -17,6 +17,10 @@
 # pylint: disable=unused-argument
 """The base parser for ir module"""
 
+from tvm.ir import GlobalVar
+from tvm.relax import ExternFunc
+
+from ...ir_builder import IRBuilder
 from ...ir_builder import ir as I
 from .._core import Parser, dispatch, doc
 
@@ -124,4 +128,16 @@ def pre_visit_local_function(self: Parser, node: doc.Expr) -> None:
 
 @dispatch.register(token="default", type_name="post_visit_local_function")
 def post_visit_local_function(self: Parser, node: doc.Expr) -> None:
+    pass
+
+
+@dispatch.register(token="pyfunc", type_name="tvm_declare_function")
+def visit_tvm_declare_function(self: Parser, node: doc.FunctionDef) -> GlobalVar:
+    func = ExternFunc(node.name)
+    func = func.with_attr("is_pyfunc", True)
+    return I.decl_function(node.name, func)
+
+
+@dispatch.register(token="pyfunc", type_name="FunctionDef")
+def visit_function_def(self: Parser, node: doc.FunctionDef) -> None:
     pass

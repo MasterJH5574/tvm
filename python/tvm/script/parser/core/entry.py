@@ -19,6 +19,8 @@ import inspect
 from typing import Any, Dict, Union
 
 import tvm
+from tvm.relax import ExternFunc
+
 from ....ir.module import IRModule
 from ...ir_builder import IRBuilder
 from . import doc
@@ -86,12 +88,15 @@ def parse(
         extra_vars = _default_globals()
 
     ann = {}
+    all_pyfuncs = {}
     if inspect.isfunction(program):
         ann = {program.__name__: program.__annotations__}
     elif inspect.isclass(program):
         for name, func in program.__dict__.items():
             if inspect.isfunction(func):
+                print(f"name: {name}, func: {func}, annotations: {func.__annotations__}")
                 ann[name] = func.__annotations__
+                all_pyfuncs[name] = func
 
     source = Source(program)
     parser = Parser(source, ann)
@@ -101,6 +106,17 @@ def parse(
         except ParserError as err:
             parser.report_error(err.node, err.args[0])
     ret = builder.get()
+    # Attach PyFunc to the IRModule
+    if inspect.isclass(program):
+        assert isinstance(ret, IRModule)
+        for gv, func in ret.functions_items():
+            if isinstance(func, ExternFunc) and func.attrs.get("is_pyfunc", False):
+                pyfunc = all_pyfuncs[gv.name_hint]
+                if not hasattr(ret, "pyfuncs"):
+                    ret.pyfuncs = {}
+                ret.pyfuncs[gv.name_hint] = pyfunc
+                ret[gv] = func.with_attr("python_source", inspect.getsource(pyfunc))
+
     # check well-formedness in both Relax and TIR
     if check_well_formed:
         check_ret = ret
