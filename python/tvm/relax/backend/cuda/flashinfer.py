@@ -117,7 +117,7 @@ def _compile_flashinfer_kernels(
 
     # Determine compute version
     compute_version = "".join(tvm.contrib.nvcc.get_target_compute_version(target).split("."))
-    if compute_version in ["90"]:
+    if compute_version in ["90", "100"]:
         compute_version += "a"
     cuda_cflags += [
         "-gencode",
