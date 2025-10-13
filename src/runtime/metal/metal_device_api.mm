@@ -26,6 +26,9 @@
 #include <tvm/runtime/profiling.h>
 #include "metal_common.h"
 
+#include <thread>
+#include <chrono>
+
 namespace tvm {
 namespace runtime {
 namespace metal {
@@ -185,7 +188,8 @@ void* MetalWorkspace::AllocDataSpace(Device device, size_t nbytes, size_t alignm
   AUTORELEASEPOOL {
     id<MTLDevice> dev = GetDevice(device);
     // GPU memory only
-    MTLResourceOptions storage_mode = MTLResourceStorageModePrivate;
+    // MTLResourceOptions storage_mode = MTLResourceStorageModePrivate;
+    MTLResourceOptions storage_mode =  MTLStorageModeShared;
     /*
     #if TARGET_OS_IPHONE
     storage_mode = MTLResourceStorageModeShared;
@@ -195,6 +199,7 @@ void* MetalWorkspace::AllocDataSpace(Device device, size_t nbytes, size_t alignm
     */
     buf = [dev newBufferWithLength:nbytes options:storage_mode];
     ICHECK(buf != nil);
+    // LOG(INFO) << "AllocDataSpace: " << (void*)(buf) << ", nbytes: " << nbytes;
   };
   return (void*)(buf);
 }
@@ -207,6 +212,7 @@ void MetalWorkspace::FreeDataSpace(Device dev, void* ptr) {
     this->StreamSync(dev, nullptr);
     // MTLBuffer PurgeableState should be set to empty before manual
     // release in order to prevent memory leak
+    // LOG(INFO) << "FreeDataSpace: " << ptr;
     [(id<MTLBuffer>)ptr setPurgeableState:MTLPurgeableStateEmpty];
     // release the ptr.
     CFRelease(ptr);
@@ -246,40 +252,42 @@ void MetalWorkspace::CopyDataFromTo(const void* from, size_t from_offset, void* 
     } else if (from_dev_type == kDLMetal && to_dev_type == kDLCPU) {
       // copy to a local buffer before get into global buffer.
       id<MTLBuffer> from_buf = (id<MTLBuffer>)(from);
-      if (from_buf.storageMode != MTLStorageModeShared) {
-        id<MTLBuffer> temp = MetalThreadEntry::ThreadLocal()->GetTempBuffer(dev_from, size);
-        id<MTLBlitCommandEncoder> encoder = [cb blitCommandEncoder];
-        [encoder copyFromBuffer:from_buf
-                   sourceOffset:from_offset
-                       toBuffer:temp
-              destinationOffset:0
-                           size:size];
-        [encoder endEncoding];
-        [cb commit];
-        [cb waitUntilCompleted];
-        memcpy(static_cast<char*>(to) + to_offset, static_cast<char*>([temp contents]), size);
-      } else {
+      // if (from_buf.storageMode != MTLStorageModeShared) {
+        // id<MTLBuffer> temp = MetalThreadEntry::ThreadLocal()->GetTempBuffer(dev_from, size);
+        // id<MTLBlitCommandEncoder> encoder = [cb blitCommandEncoder];
+        // [encoder copyFromBuffer:from_buf
+        //            sourceOffset:from_offset
+        //                toBuffer:temp
+        //       destinationOffset:0
+        //                    size:size];
+        // [encoder endEncoding];
+        // [cb commit];
+        // [cb waitUntilCompleted];
+        // memcpy(static_cast<char*>(to) + to_offset, static_cast<char*>([temp contents]), size);
+      // } else {
+        MetalWorkspace::Global()->StreamSync(dev_from, nullptr);
         memcpy(static_cast<char*>(to) + to_offset,
                static_cast<char*>([from_buf contents]) + from_offset, size);
-      }
+      // }
     } else if (from_dev_type == kDLCPU && to_dev_type == kDLMetal) {
       id<MTLBuffer> to_buf = (id<MTLBuffer>)(to);
-      if (to_buf.storageMode != MTLStorageModeShared) {
-        id<MTLBuffer> temp = MetalThreadEntry::ThreadLocal()->GetTempBuffer(dev_to, size);
-        memcpy([temp contents], static_cast<const char*>(from) + from_offset, size);
-        id<MTLBlitCommandEncoder> encoder = [cb blitCommandEncoder];
-        [encoder copyFromBuffer:temp
-                   sourceOffset:0
-                       toBuffer:to_buf
-              destinationOffset:to_offset
-                           size:size];
-        [encoder endEncoding];
-        [cb commit];
-        [cb waitUntilCompleted];
-      } else {
+      // if (to_buf.storageMode != MTLStorageModeShared) {
+        // id<MTLBuffer> temp = MetalThreadEntry::ThreadLocal()->GetTempBuffer(dev_to, size);
+        // memcpy([temp contents], static_cast<const char*>(from) + from_offset, size);
+        // id<MTLBlitCommandEncoder> encoder = [cb blitCommandEncoder];
+        // [encoder copyFromBuffer:temp
+        //            sourceOffset:0
+        //                toBuffer:to_buf
+        //       destinationOffset:to_offset
+        //                    size:size];
+        // [encoder endEncoding];
+        // [cb commit];
+        // [cb waitUntilCompleted];
+      // } else {
+        // MetalWorkspace::Global()->StreamSync(dev_to, nullptr);
         memcpy(static_cast<char*>([to_buf contents]) + to_offset,
                static_cast<const char*>(from) + from_offset, size);
-      }
+      // }
     } else {
       LOG(FATAL) << "Expect copy from/to Metal or between Metal"
                  << ", from=" << from_dev_type << ", to=" << to_dev_type;
@@ -392,10 +400,31 @@ class MetalTimerNode : public TimerNode {
   MTLTimestamp stop_gpu_time_;
 };
 
+// void* MetalMTLBufferViewWithOffset(void* buffer, int64_t offset, int64_t size, Device device) {
+//   id<MTLBuffer> view_buffer;
+//   AUTORELEASEPOOL {
+//     id<MTLDevice> mtl_device = MetalWorkspace::Global()->GetDevice(device);
+//     void* data = static_cast<char*>([(id<MTLBuffer>)buffer contents]) + offset;
+//    LOG(INFO) << "calling newBufferWithBytesNoCopy";
+//     view_buffer = [mtl_device newBufferWithBytesNoCopy:data length:size options:MTLStorageModeShared deallocator:nil];
+//     ICHECK(view_buffer != nil);
+//    LOG(INFO) << "calling newBufferWithBytesNoCopy returned";
+//   };
+//   return (void*)(view_buffer);
+// }
+
 TVM_FFI_STATIC_INIT_BLOCK() {
   namespace refl = tvm::ffi::reflection;
   refl::GlobalDef().def("profiling.timer.metal",
-                        [](Device dev) { return Timer(ffi::make_object<MetalTimerNode>(dev)); });
+                        [](Device dev) { return Timer(ffi::make_object<MetalTimerNode>(dev)); })
+                        // .def("metal.MTLBufferViewWithOffset",
+                        //      [](void* buffer, int64_t offset, int64_t size, Device device) {
+                        //        return MetalMTLBufferViewWithOffset(buffer, offset, size, device);
+                        //      })
+                             .def("metal.GetMTLBufferRawDataPointer", [](void* buffer) {
+                                return (void*)[(id<MTLBuffer>)buffer contents];
+                              }
+                             );
 }
 
 }  // namespace metal

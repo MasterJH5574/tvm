@@ -1412,6 +1412,7 @@ Buffer CreateReindexBuffer(const Buffer& buffer, const ffi::Array<IterVar>& bloc
   new_buffer->strides = new_strides;
   new_buffer->data = buffer->data.copy_with_suffix("_reindex");
   new_buffer->name = buffer->name + "_reindex";
+  new_buffer->elem_offset = tvm::IntImm(tvm::DataType::Int(32), 0);
   return Buffer(new_buffer);
 }
 
@@ -1741,6 +1742,7 @@ StmtSRef CacheRead(ScheduleState self, const StmtSRef& block_sref, int read_buff
                            !AllConsumersUnderStmt(self, read_buffer, scope_sref, info.loc_sref);
   info.cache_region = cache_region;
   info.write_buffer = WithScope(read_buffer, storage_scope);
+  info.write_buffer.CopyOnWrite()->elem_offset = tvm::IntImm(tvm::DataType::Int(32), 0);
   if (!cache_full_region) {
     auto* write_buffer = info.write_buffer.CopyOnWrite();
     std::vector<PrimExpr> shape;
@@ -1817,6 +1819,7 @@ StmtSRef CacheWrite(ScheduleState self, const StmtSRef& block_sref, int write_bu
                            !AllConsumersUnderStmt(self, write_buffer, scope_sref, info.loc_sref);
   info.cache_region = cache_region;
   info.read_buffer = WithScope(write_buffer, storage_scope);
+  info.read_buffer.CopyOnWrite()->elem_offset = tvm::IntImm(tvm::DataType::Int(32), 0);
   if (!cache_full_region) {
     auto* read_buffer = info.read_buffer.CopyOnWrite();
     std::vector<PrimExpr> shape;
@@ -1971,6 +1974,7 @@ void CollectReindexCacheStageInfoAndCreateBuffer(
   new_buffer->data = Var(new_var->name_hint + "_" + storage_scope, new_var->type_annotation);
   new_buffer->name = old_buffer->name + "_" + storage_scope;
   new_buffer->shape = new_shape;
+  new_buffer->elem_offset = tvm::IntImm(tvm::DataType::Int(32), 0);
 
   if (is_cache_read) {
     info->write_buffer = Buffer(new_buffer);
@@ -2179,6 +2183,7 @@ ffi::Array<StmtSRef> CacheInplace(ScheduleState self, const StmtSRef& block_sref
 
   ffi::Array<StmtSRef> results_block_sref;
   Buffer new_buffer = WithScope(buffer, storage_scope);
+  new_buffer.CopyOnWrite()->elem_offset = tvm::IntImm(tvm::DataType::Int(32), 0);
 
   // Do cache read
   // Cache read step 0. Create CacheStageInfo

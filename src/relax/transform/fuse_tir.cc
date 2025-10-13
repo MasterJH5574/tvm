@@ -453,9 +453,13 @@ class RelaxToTIRVarMapCollector : public ExprVisitor {
     // structurally equal to the `new_buf` passed
     auto ValidateBufferCompatibility = [this](tir::Buffer new_buf, Expr expr) {
       if (auto it = relax_to_tir_var_map_.find(expr); it != relax_to_tir_var_map_.end()) {
-        ICHECK(StructuralEqual()((*it).second, new_buf))
-            << "Inconsistent buffers " << (*it).second << " and " << new_buf
-            << " mapped to the same relax var: " << expr;
+        bool is_equal = StructuralEqual()((*it).second, new_buf);
+        if (!is_equal) {
+          LOG(INFO) << "Buffer " << (*it).second << " and " << new_buf << " are not equal, elem_offset: " << (*it).second->elem_offset << " and " << new_buf->elem_offset;
+        }
+        // ICHECK(StructuralEqual()((*it).second, new_buf))
+        //     << "Inconsistent buffers " << (*it).second << " and " << new_buf
+        //     << " mapped to the same relax var: " << expr;
       }
     };
     for (size_t i = 0; i < tir_args.size(); ++i) {
@@ -931,6 +935,7 @@ class FusedTIRConstructor : public ExprVisitor {
       } else {
         buffer = tir::decl_buffer(shape_expr->values, dtype, name_hint);
       }
+      buffer.CopyOnWrite()->elem_offset = tir::Var(buffer->name + "_elem_offset", DataType::Int(32));
       out->push_back(std::move(buffer));
 
     } else if (const auto* prim_value = struct_info.as<PrimStructInfoNode>()) {

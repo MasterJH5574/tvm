@@ -715,8 +715,9 @@ void RewriteStageToBlock(const te::Operation& op, CreateFuncInfo* info,
     // Declare a buffer for any argument tensors without a pre-existing
     // buffer declaration recorded in the tensor2buffer binds map
     if (info->tensor2buffers.count(tensor) == 0) {
-      const Buffer& buffer =
+      Buffer buffer =
           decl_buffer(placeholder->shape, placeholder->dtype, placeholder->name, "global");
+      buffer.CopyOnWrite()->elem_offset = tir::Var(buffer->name + "_elem_offset", placeholder->shape[0].dtype());
       info->tensor2buffers[tensor] = buffer;
     }
   } else if (auto compute_op = op.as<te::ComputeOp>()) {

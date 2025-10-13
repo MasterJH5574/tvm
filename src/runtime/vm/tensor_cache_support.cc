@@ -44,6 +44,9 @@
 #include <tvm/runtime/tensor.h>
 #include <tvm/runtime/vm/tensor_cache_support.h>
 
+#include <fstream>
+#include <thread>
+#include <chrono>
 #include <string>
 #include <vector>
 
@@ -184,21 +187,98 @@ Tensor TensorCacheMetadata::FileRecord::ParamRecord::Load(
   return arr;
 }
 
+// class ViewHelper {
+//   public:
+//    explicit ViewHelper(Tensor source) : source_(source) {}
+//    void AllocData(DLTensor* tensor, int64_t extra_byte_offset, int64_t nbytes) {
+//      if (extra_byte_offset == 0) {
+//       tensor->data = source_->data;
+//      LOG(INFO) << "ViewHelper returning early because extra_byte_offset is 0";
+//       return;
+//      }
+//      static ffi::Function metal_view_with_offset = ffi::Function::GetGlobalRequired("metal.MTLBufferViewWithOffset");
+//     LOG(INFO) << "calling metal.MTLBufferViewWithOffset";
+//     //  tensor->data = source_->data;
+//      tensor->data = metal_view_with_offset(source_->data, extra_byte_offset, nbytes, source_->device).cast<void*>();
+//     LOG(INFO) << "calling metal.MTLBufferViewWithOffset returned";
+//    }
+
+//    void FreeData(DLTensor* tensor) {}
+
+//   private:
+//    Tensor source_;
+//  };
+
+Tensor LoadBinaryFromFileToMemory(const std::string& file_name, Device device) {
+  std::ifstream fs(file_name, std::ios::in | std::ios::binary);
+  ICHECK(!fs.fail()) << "Cannot open " << file_name;
+  // get its size:
+  fs.seekg(0, std::ios::end);
+  size_t size = static_cast<size_t>(fs.tellg());
+  fs.seekg(0, std::ios::beg);
+  // LOG(INFO) << "LoadBinaryFromFileToMemory: " << file_name << ", size: " << size;
+  // Tensor arr = Tensor::Empty({static_cast<int64_t>(size)}, DataType::UInt(8), Device{DLDeviceType::kDLCPU, 0});
+  Tensor arr = Tensor::Empty({static_cast<int64_t>(size)}, DataType::UInt(8), device);
+  void* data_ptr = arr->data;
+  static ffi::Function get_mtl_buffer_raw_data_pointer = ffi::Function::GetGlobalRequired("metal.GetMTLBufferRawDataPointer");
+  void* raw_data_ptr = get_mtl_buffer_raw_data_pointer(data_ptr).cast<void*>();
+  // LOG(INFO) << "LoadBinaryFromFileToMemory before read, raw data pointer: " << raw_data_ptr;
+  fs.read(static_cast<char*>(raw_data_ptr), size);
+  // LOG(INFO) << "LoadBinaryFromFileToMemory after read";
+  return arr;
+}
+
+Tensor ParamRecordLoadFromTensor(const TensorCacheMetadata::FileRecord::ParamRecord& param_record, Tensor raw_data) {
+  // LOG(INFO) << "Creating view for " << param_record.name << " with shape " << param_record.shape << ", dtype " << param_record.dtype << ", nbytes " << param_record.nbytes << ", byte_offset " << param_record.byte_offset;
+  Tensor view = raw_data.CreateView(param_record.shape, param_record.dtype, param_record.byte_offset);
+  // Tensor new_tensor = Tensor::Empty(param_record.shape, param_record.dtype, raw_data->device);
+  // new_tensor.CopyFrom(view);
+  // return new_tensor;
+  // ffi::Function dump_tensor = ffi::Function::GetGlobalRequired("dump_tensor");
+  // dump_tensor(view, param_record.name);
+  // Tensor view = Tensor::FromNDAlloc(ViewHelper(raw_data), param_record.shape,
+  //                           param_record.dtype, raw_data->device, param_record.byte_offset, param_record.nbytes);
+  // LOG(INFO) << "Created view";
+  return view;
+}
+
+// struct TensorCacheThreadEntry {
+//    std::vector<Tensor> raw_tensors;
+
+//    static TensorCacheThreadEntry* ThreadLocal() {
+//     thread_local static TensorCacheThreadEntry entry;
+//     return &entry;
+//    }
+//  };
+
 TVM_DLL ffi::Array<Tensor> TensorCacheMetadata::FileRecord::Load(
     Device device,
     const std::string& path_prefix,  //
     std::string* raw_data_buffer,    //
     ffi::Optional<Tensor>* staging_buffer) const {
-  LoadBinaryFromFile(path_prefix + "/" + this->data_path, raw_data_buffer);
+  // LoadBinaryFromFile(path_prefix + "/" + this->data_path, raw_data_buffer);
+  Tensor data = LoadBinaryFromFileToMemory(path_prefix + "/" + this->data_path, device);
+  // TensorCacheThreadEntry::ThreadLocal()->raw_tensors.push_back(data);
+  // LOG(INFO) << "file loaded";
+  // std::this_thread::sleep_for(std::chrono::seconds(10));
   CHECK_EQ(this->format, "raw-shard") << "ValueError: Only `raw-shard` format is supported";
-  CHECK_EQ(this->nbytes, raw_data_buffer->length())
-      << "ValueError: Encountered an corrupted parameter shard. It means it is not downloaded "
-         "completely or downloading is interrupted. Please try to download again.";
+  // CHECK_EQ(this->nbytes, raw_data_buffer->length())
+  //     << "ValueError: Encountered an corrupted parameter shard. It means it is not downloaded "
+  //        "completely or downloading is interrupted. Please try to download again.";
   ffi::Array<Tensor> result;
   result.reserve(this->records.size());
+  // LOG(INFO) << "records size: " << this->records.size();
   for (const ParamRecord& nd_rec : this->records) {
-    result.push_back(nd_rec.Load(device, raw_data_buffer, staging_buffer));
+    // result.push_back(nd_rec.Load(device, raw_data_buffer, staging_buffer));
+    // LOG(INFO) << "Loading param: " << nd_rec.name;
+    result.push_back(ParamRecordLoadFromTensor(nd_rec, data));
+    // LOG(INFO) << "Loaded param: " << nd_rec.name;
+
+    // ffi::Function dump_tensor = ffi::Function::GetGlobalRequired("dump_tensor");
+    // dump_tensor(result.back(), nd_rec.name);
   }
+  // Todo: TE legalize add offset_factor
+  // LOG(INFO) << "FileRecord::Load returned";
   return result;
 }
 
@@ -263,6 +343,69 @@ class TensorCache {
     }
   }
 
+  static void LoadByNames(const std::string& cache_path, const ffi::Array<ffi::String>& names,
+                          int device_type, int device_id) {
+    DLDevice device{static_cast<DLDeviceType>(device_type), device_id};
+    TensorCacheMetadata metadata = TensorCacheMetadata::Load(cache_path);
+    ffi::Optional<Tensor> staging_buffer;
+    std::string raw_data;
+    ffi::Array<Tensor> params;
+
+    auto f_shard_rec_contains_name = [](const TensorCacheMetadata::FileRecord& shard_rec,
+                                        const ffi::String& name) {
+      for (const TensorCacheMetadata::FileRecord::ParamRecord& param_rec : shard_rec.records) {
+        if (param_rec.name == name) {
+          return true;
+        }
+      }
+      return false;
+    };
+
+    for (const TensorCacheMetadata::FileRecord& shard_rec : metadata.records) {
+      // if shard_rec doesn't contain any of the names, skip
+      bool contains_any_name = false;
+      for (const ffi::String& name : names) {
+        if (f_shard_rec_contains_name(shard_rec, name)) {
+          contains_any_name = true;
+          break;
+        }
+      }
+      if (!contains_any_name) {
+        continue;
+      }
+
+      // LOG(INFO) << "processing shard_rec: " << shard_rec.data_path;
+      try {
+        params = shard_rec.Load(device, cache_path, &raw_data, &staging_buffer);
+      } catch (const dmlc::Error& e) {
+        LOG(FATAL) << "ValueError: Error when loading parameters from " << shard_rec.data_path
+                   << ": " << e.what();
+      }
+      int num_params = params.size();
+      for (int i = 0; i < num_params; ++i) {
+        if (std::find(names.begin(), names.end(), ffi::String(shard_rec.records[i].name)) ==
+            names.end()) {
+          // LOG(INFO) << "[skip] loaded param: " << shard_rec.records[i].name
+          //           << " shape=" << shard_rec.records[i].shape
+          //           << ", dtype=" << shard_rec.records[i].dtype
+          //           << ", size=" << shard_rec.records[i].nbytes << " bytes";
+          continue;
+        }
+        Update(shard_rec.records[i].name, params[i], true);
+        // LOG(INFO) << "[keep] loaded param: " << shard_rec.records[i].name
+        //           << " shape=" << shard_rec.records[i].shape
+        //           << ", dtype=" << shard_rec.records[i].dtype
+        //           << ", size=" << shard_rec.records[i].nbytes << " bytes";
+      }
+      // LOG(INFO) << "before clear raw_data";
+      // std::this_thread::sleep_for(std::chrono::seconds(10));
+      raw_data.clear();
+      raw_data.shrink_to_fit();
+      // LOG(INFO) << "after clear raw_data";
+      // std::this_thread::sleep_for(std::chrono::seconds(10));
+    }
+  }
+
  private:
   ffi::Map<ffi::String, Tensor> pool_;
 };
@@ -297,7 +440,8 @@ TVM_FFI_STATIC_INIT_BLOCK() {
                   })
       .def("vm.builtin.tensor_cache.remove", TensorCache::Remove)
       .def("vm.builtin.tensor_cache.clear", TensorCache::Clear)
-      .def("vm.builtin.tensor_cache.load", TensorCache::Load);
+      .def("vm.builtin.tensor_cache.load", TensorCache::Load)
+      .def("vm.builtin.tensor_cache.load_by_names", TensorCache::LoadByNames);
 }
 
 // This param module node can be useful to get param dict in RPC mode

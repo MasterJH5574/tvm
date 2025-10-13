@@ -635,6 +635,7 @@ ffi::Array<Buffer> CreateRFactorBuffers(const ffi::Array<BufferStore>& buf_store
     n->shape = rf_shape;
     n->name = buffer->name + ".rf";
     n->data = buffer->data.copy_with_suffix(".rf");
+    n->elem_offset = tvm::IntImm(tvm::DataType::Int(32), 0);
     rf_buffers.push_back(Buffer(n));
   }
   return rf_buffers;

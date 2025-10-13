@@ -515,6 +515,9 @@ TVM_FFI_STATIC_INIT_BLOCK() {
       .def(
           "vm.builtin.reshape",
           [](Tensor data, ffi::Shape new_shape) { return data.CreateView(new_shape, data->dtype); })
+      .def(
+          "vm.builtin.reshape_with_offset",
+          [](Tensor data, ffi::Shape new_shape, int64_t relative_elem_offset) { return data.CreateView(new_shape, data->dtype, relative_elem_offset * DataType(data->dtype).bytes()); })
       .def("vm.builtin.null_value", []() -> std::nullptr_t { return nullptr; })
       .def("vm.builtin.to_device", [](Tensor data, int dev_type, int dev_id) {
         Device dst_device = {(DLDeviceType)dev_type, dev_id};
