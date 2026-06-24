@@ -43,6 +43,7 @@ dnf clean all
 # the LLVM prefix; the main CPU wheel links LLVM statically. The manylinux image
 # ships no cmake/ninja, so install the build tools here.
 export PATH="/opt/python/cp310-cp310/bin:/usr/local/cuda/bin:${PATH}"
+ls /usr/local/cuda/bin
 nvcc --version
 
 rm -rf "${build_dir}"
@@ -66,3 +67,4 @@ cuda_lib="${build_dir}/lib/libtvm_runtime_cuda.so"
 test -f "${cuda_lib}"
 patchelf --set-rpath '$ORIGIN' "${cuda_lib}"
 echo "CUDA runtime: ${cuda_lib}"
+ldd "${cuda_lib}"
